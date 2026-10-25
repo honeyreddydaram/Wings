@@ -12,7 +12,8 @@
       }
     },
     "android": {
-      "package": "com.cowingman.app"
+      "package": "com.cowingman.app",
+      "versionCode": 1
     },
     "web": {
       "bundler": "metro"
@@ -30,7 +31,8 @@
           "cameraPermission": "Allow Co-Wingman to scan a QR code only while the card scanner is open."
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "expo-secure-store"
     ]
   }
 }

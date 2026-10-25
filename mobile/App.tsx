@@ -13,6 +13,7 @@ import {
   Linking,
   Share,
   Alert,
+  AppState,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
@@ -34,6 +35,17 @@ import {
   signUp,
   User,
 } from "./src/auth";
+import {
+  clearActiveSession,
+  loadActiveSession,
+  saveActiveSession,
+} from "./src/sessionStore";
+import {
+  PerformanceSnapshot,
+  PerformanceTracker,
+  PERFORMANCE_TARGETS,
+} from "./src/performanceTracker";
+import { DEMO_SCENARIO } from "./src/demoScenario";
 
 type Cue = { id: string; category: string; text: string };
 type Session = { id: string; token: string; mode: string; memory: string };
@@ -108,15 +120,14 @@ const AUDIO_CHUNK_SECONDS = Math.min(
 const C = {
   bg: "#F7F8F4",
   ink: "#203D32",
-  muted: "#7D8A80",
+  muted: "#59675E",
   green: "#34654E",
   pale: "#EDF2EA",
   line: "#E1E6DD",
   white: "#FFFFFF",
-  orange: "#B78043",
+  orange: "#8A5A25",
 };
-const SAMPLE =
-  "I’ve been working on a product design project with a small team. We just finished our first round of user research, and some of the feedback really surprised me.";
+const SAMPLE = DEMO_SCENARIO.transcript;
 function Icon({
   name,
   size = 20,
@@ -132,10 +143,8 @@ export default function App() {
   const { width } = useWindowDimensions();
   const wide = width > 1000;
   const [page, setPage] = useState("session");
-  const [name, setName] = useState("Alex Morgan");
-  const [context, setContext] = useState(
-    "Product designer · First coffee together",
-  );
+  const [name, setName] = useState<string>(DEMO_SCENARIO.partnerName);
+  const [context, setContext] = useState<string>(DEMO_SCENARIO.context);
   const [contact, setContact] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [cues, setCues] = useState<Cue[]>([]);
@@ -143,6 +152,7 @@ export default function App() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [voice, setVoice] = useState(true);
   const [remember, setRemember] = useState(false);
   const [signal, setSignal] = useState("low");
@@ -181,6 +191,11 @@ export default function App() {
   const assistantSpeakingRef = useRef(false);
   const busyRef = useRef(false);
   const automaticRequestPending = useRef(false);
+  const recoveryAttemptedFor = useRef("");
+  const performanceTracker = useRef(new PerformanceTracker());
+  const [performance, setPerformance] = useState<PerformanceSnapshot>(
+    performanceTracker.current.snapshot(),
+  );
   const audio = useRollingAudioPipeline({
     chunkSeconds: AUDIO_CHUNK_SECONDS,
     onChunk: uploadAudioChunk,
@@ -235,6 +250,35 @@ export default function App() {
     void loadProfile();
   }, [authReady, owner, authUser?.uid]);
   useEffect(() => {
+    const ownerId = firebaseConfigured ? authUser?.uid || "" : owner;
+    if (!authReady || !ownerId || recoveryAttemptedFor.current === ownerId) return;
+    recoveryAttemptedFor.current = ownerId;
+    void (async () => {
+      const stored = await loadActiveSession();
+      if (!stored) return;
+      if (stored.ownerId !== ownerId) {
+        await clearActiveSession();
+        return;
+      }
+      try {
+        const response = await fetch(`${API}/session/${stored.session.id}/status`, {
+          headers: { Authorization: `Bearer ${stored.session.token}` },
+        });
+        if (!response.ok) {
+          if ([401, 410].includes(response.status)) await clearActiveSession();
+          return;
+        }
+        const status = await response.json();
+        setSession({ ...stored.session, mode: status.mode, memory: status.memory || "" });
+        setSignal(status.signal || "low");
+        setSeconds(Math.max(0, Math.floor((Date.now() - stored.startedAtMs) / 1000)));
+        setNotice("Recovered your active session. The microphone stayed paused for privacy.");
+      } catch {
+        setNotice("An active session is saved securely, but it could not be verified while offline.");
+      }
+    })();
+  }, [authReady, owner, authUser?.uid]);
+  useEffect(() => {
     if (page !== "card" || !authReady || !owner || (firebaseConfigured && !authUser)) return;
     void loadExchange();
   }, [page, authReady, owner, authUser?.uid]);
@@ -243,6 +287,15 @@ export default function App() {
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
   }, [session, ended]);
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active" && audio.phase === "recording") {
+        void audio.pause(true);
+        setNotice("Recording paused when Wings left the foreground. Tap the microphone to resume after confirming awareness.");
+      }
+    });
+    return () => subscription.remove();
+  }, [audio.phase, audio.pause]);
   async function api(
     path: string,
     body?: any,
@@ -268,6 +321,11 @@ export default function App() {
         : {}),
     });
     if (!res.ok) {
+      if (active && [401, 410].includes(res.status)) {
+        await clearActiveSession();
+        setSession(null);
+        setNotice("That session expired or could not be resumed. Start a new conversation when you’re ready.");
+      }
       const detail = await res.json().catch(() => ({}));
       throw new Error(detail.detail || `Request failed (${res.status})`);
     }
@@ -333,6 +391,7 @@ export default function App() {
           style: "destructive",
           onPress: () => void run("Deleting your account data", async () => {
             await identityFetch("/account/me", { method: "DELETE" });
+            await clearActiveSession();
             if (firebaseConfigured) await signOutUser();
             setProfile(EMPTY_PROFILE);
             setCard(EMPTY_CARD);
@@ -508,6 +567,7 @@ export default function App() {
       return;
     }
     await run("Starting", async () => {
+      setNotice("");
       const s = await api(
         "/session/start",
         { name, context, contact, remember, owner },
@@ -516,6 +576,12 @@ export default function App() {
         firebaseConfigured,
       );
       setSession(s);
+      const ownerId = firebaseConfigured ? authUser?.uid || "" : owner;
+      try {
+        await saveActiveSession({ ownerId, session: s, startedAtMs: Date.now() });
+      } catch {
+        setNotice("The session started, but secure restart recovery is unavailable on this device.");
+      }
       setEnded(null);
       setSeconds(0);
       setCues([]);
@@ -531,6 +597,8 @@ export default function App() {
         triggered: false,
       });
       difficultyDetector.current.reset(Date.now());
+      performanceTracker.current.reset();
+      setPerformance(performanceTracker.current.snapshot());
       audio.reset();
     });
   }
@@ -559,10 +627,20 @@ export default function App() {
       setAutomaticExplanation("");
     }
     await run("Finding a little inspiration", async () => {
-      const data = await api(`/session/${session.id}/cue`);
-      setCues(data.cues);
-      setSignal(data.signal);
-      if (voice && data.cues[0]) void play(data.cues[0]);
+      const startedAt = Date.now();
+      performanceTracker.current.beginCue();
+      try {
+        const data = await api(`/session/${session.id}/cue`);
+        performanceTracker.current.finishCue(startedAt);
+        setCues(data.cues);
+        setSignal(data.signal);
+        if (voice && data.cues[0]) void play(data.cues[0]);
+      } catch (requestError) {
+        performanceTracker.current.failCue();
+        throw requestError;
+      } finally {
+        setPerformance(performanceTracker.current.snapshot());
+      }
     });
   }
   async function uploadAudioChunk(
@@ -571,6 +649,7 @@ export default function App() {
     capturedAtMs: number,
   ) {
     if (!session) return;
+    performanceTracker.current.beginAudio();
     const form = new FormData();
     form.append("chunk_index", String(chunkIndex));
     form.append("captured_at_ms", String(capturedAtMs));
@@ -588,7 +667,11 @@ export default function App() {
           body: form,
         });
       } catch (networkError) {
-        if (attempt === 1) throw networkError;
+        if (attempt === 1) {
+          performanceTracker.current.failAudio();
+          setPerformance(performanceTracker.current.snapshot());
+          throw networkError;
+        }
         continue;
       }
       if (attempt === 0 && [409, 502, 503, 504].includes(response.status)) {
@@ -596,16 +679,27 @@ export default function App() {
       }
       break;
     }
-    if (!response)
+    if (!response) {
+      performanceTracker.current.failAudio();
+      setPerformance(performanceTracker.current.snapshot());
       throw new Error("Audio upload failed before receiving a response.");
-    if (response.status === 422) return;
+    }
+    if (response.status === 422) {
+      performanceTracker.current.ignoreAudio();
+      setPerformance(performanceTracker.current.snapshot());
+      return;
+    }
     if (!response.ok) {
+      performanceTracker.current.failAudio();
+      setPerformance(performanceTracker.current.snapshot());
       const detail = await response.json().catch(() => ({}));
       throw new Error(
         detail.detail || `Audio upload failed (${response.status})`,
       );
     }
     const result = await response.json();
+    performanceTracker.current.finishAudio(capturedAtMs);
+    setPerformance(performanceTracker.current.snapshot());
     difficultyDetector.current.observeTranscript(result.text, capturedAtMs);
     setTranscript((t) => (t + " " + result.text).slice(-2000));
     setSignal(result.signal);
@@ -637,6 +731,7 @@ export default function App() {
       await audio.flush();
       const data = await api(`/session/${session.id}/end`);
       setEnded(data);
+      await clearActiveSession();
       Speech.stop();
       setAssistantSpeaking(false);
       setAutoAssist(false);
@@ -656,6 +751,7 @@ export default function App() {
   }) => (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={text}
       disabled={!!busy}
       onPress={onPress}
       style={({ hovered }: any) => [
@@ -707,6 +803,9 @@ export default function App() {
           ].map((item) => (
             <Pressable
               key={item.id}
+              accessibilityRole="button"
+              accessibilityLabel={item.label}
+              accessibilityState={{ selected: page === item.id }}
               onPress={() => setPage(item.id)}
               style={[s.nav, page === item.id && s.navActive]}
             >
@@ -734,7 +833,7 @@ export default function App() {
               in the moment.
             </Text>
           </View>
-          <Pressable onPress={() => setPage("profile")} style={s.profile}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Open your profile" onPress={() => setPage("profile")} style={s.profile}>
             <View style={s.avatar}>
               <Text style={{ color: C.green, fontWeight: "600" }}>
                 {profile.display_name
@@ -796,6 +895,8 @@ export default function App() {
             <Icon name="leaf" />
             <Text style={s.brandText}>co-wingman.</Text>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={page === "session" ? "Open privacy information" : "Back to conversation"}
               onPress={() => setPage(page === "session" ? "about" : "session")}
               style={{ marginLeft: "auto" }}
             >
@@ -825,7 +926,7 @@ export default function App() {
               ["notes", "Notes"],
               ["about", "Privacy"],
             ].map(([id, label]) => (
-              <Pressable key={id} onPress={() => setPage(id)}>
+              <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: page === id }} key={id} onPress={() => setPage(id)} style={s.mobileNavItem}>
                 <Text
                   style={{
                     color: page === id ? C.green : C.muted,
@@ -890,8 +991,17 @@ export default function App() {
           <View accessibilityRole="alert" style={s.error}>
             <Icon name="alert-circle-outline" color="#9B4C3D" />
             <Text style={{ color: "#9B4C3D", flex: 1 }}>{error}</Text>
-            <Pressable onPress={() => setError("")}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Dismiss error" hitSlop={12} onPress={() => setError("")}>
               <Icon name="close" color="#9B4C3D" />
+            </Pressable>
+          </View>
+        )}
+        {notice !== "" && (
+          <View accessibilityRole="alert" style={s.notice}>
+            <Icon name="information-circle-outline" color={C.green} />
+            <Text style={{ color: C.green, flex: 1 }}>{notice}</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Dismiss notice" hitSlop={12} onPress={() => setNotice("")}>
+              <Icon name="close" color={C.green} />
             </Pressable>
           </View>
         )}
@@ -940,7 +1050,7 @@ export default function App() {
                     ))}
                     <View style={s.toggleRow}>
                       <View style={{ flex: 1 }}><Text style={s.toggleTitle}>Publish card</Text><Text style={s.tiny}>Turning this off immediately hides the public page.</Text></View>
-                      <Switch value={card.published} onValueChange={(published) => setCard({ ...card, published })} trackColor={{ false: "#DDE3DA", true: C.green }} thumbColor="#fff" />
+                      <Switch accessibilityLabel="Publish public card" value={card.published} onValueChange={(published) => setCard({ ...card, published })} trackColor={{ false: "#DDE3DA", true: C.green }} thumbColor="#fff" />
                     </View>
                     <View style={s.profileActions}>
                       <Button text="Save card" icon="checkmark-outline" onPress={() => saveCard()} />
@@ -981,7 +1091,7 @@ export default function App() {
                         barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
                         onBarcodeScanned={({ data }) => void inspectSharedUrl(data)}
                       />
-                      <Pressable style={s.scannerClose} onPress={() => setScanning(false)}><Icon name="close" color="#fff" /></Pressable>
+                      <Pressable accessibilityRole="button" accessibilityLabel="Close QR scanner" style={s.scannerClose} onPress={() => setScanning(false)}><Icon name="close" color="#fff" /></Pressable>
                     </View>
                   )}
                   {scannedCard && (
@@ -1007,7 +1117,7 @@ export default function App() {
                   <View style={s.inputRow}>
                     <Icon name="search-outline" />
                     <TextInput value={contactSearch} onChangeText={setContactSearch} onSubmitEditing={() => void loadContacts()} placeholder="Search name, organization, or notes" style={s.transcriptInput} />
-                    <Pressable style={s.send} onPress={() => void loadContacts()}><Icon name="arrow-forward" color="#fff" size={16} /></Pressable>
+                    <Pressable accessibilityRole="button" accessibilityLabel="Search contacts" style={s.send} onPress={() => void loadContacts()}><Icon name="arrow-forward" color="#fff" size={16} /></Pressable>
                   </View>
                   {contacts.length === 0 ? <Text style={s.small}>No exchanged contacts match this search.</Text> : contacts.map((item) => (
                     <View key={item.id} style={s.savedContact}>
@@ -1207,6 +1317,7 @@ export default function App() {
                       onPress={() =>
                         run("Signing out", async () => {
                           await signOutUser();
+                          await clearActiveSession();
                           setProfile(EMPTY_PROFILE);
                           setSession(null);
                           setEnded(null);
@@ -1283,6 +1394,16 @@ export default function App() {
                 </View>
               </View>
             ))}
+            <View style={s.diagnostics} accessible accessibilityLabel="Current session performance diagnostics">
+              <Text style={s.infoTitle}>Session diagnostics</Text>
+              <Text style={s.small}>
+                Transcript p95: {performance.transcriptP95Ms === null ? "not measured" : `${performance.transcriptP95Ms} ms`} (target ≤ {PERFORMANCE_TARGETS.transcriptP95Ms} ms){"\n"}
+                Cue p95: {performance.cueP95Ms === null ? "not measured" : `${performance.cueP95Ms} ms`} (target ≤ {PERFORMANCE_TARGETS.cueP95Ms} ms){"\n"}
+                Transcription loss: {(performance.transcriptionLossRate * 100).toFixed(1)}% (target ≤ {PERFORMANCE_TARGETS.transcriptionLossRate * 100}%){"\n"}
+                Provider errors: {(performance.providerErrorRate * 100).toFixed(1)}% (target ≤ {PERFORMANCE_TARGETS.providerErrorRate * 100}%)
+              </Text>
+              <Text style={s.footnote}>Measurements stay in memory for the current session and are not sent as speech-feature telemetry.</Text>
+            </View>
             <Button
               text="Back to your conversation"
               onPress={() => setPage("session")}
@@ -1351,6 +1472,7 @@ export default function App() {
                     <View style={{ flex: 1 }}>
                       <Text style={s.label}>WHO ARE YOU TALKING TO?</Text>
                       <TextInput
+                        accessibilityLabel="Conversation partner name"
                         editable={!session || !!ended}
                         value={name}
                         onChangeText={setName}
@@ -1361,6 +1483,7 @@ export default function App() {
                     <Icon name="pencil-outline" size={17} color={C.muted} />
                   </View>
                   <TextInput
+                    accessibilityLabel="Conversation context"
                     editable={!session || !!ended}
                     value={context}
                     onChangeText={setContext}
@@ -1371,6 +1494,7 @@ export default function App() {
                   <View style={s.contextOptions}>
                     <Icon name="link-outline" size={17} />
                     <TextInput
+                      accessibilityLabel="Private contact label"
                       editable={!session || !!ended}
                       value={contact}
                       onChangeText={setContact}
@@ -1396,6 +1520,7 @@ export default function App() {
                       </Text>
                     </View>
                     <Switch
+                      accessibilityLabel="Remember topic notes"
                       disabled={!!session && !ended}
                       value={remember}
                       onValueChange={setRemember}
@@ -1624,6 +1749,7 @@ export default function App() {
                       </View>
                       <View style={s.inputRow}>
                         <TextInput
+                          accessibilityLabel="Recent conversation text"
                           multiline
                           placeholder="Or add what they just said…"
                           placeholderTextColor={C.muted}
@@ -1648,7 +1774,7 @@ export default function App() {
                           icon="sparkles-outline"
                           onPress={() => void getCues(false)}
                         />
-                        <Pressable disabled={!!busy} onPress={end}>
+                        <Pressable accessibilityRole="button" accessibilityLabel="End conversation" disabled={!!busy} onPress={end} style={s.endButton}>
                           <Text style={s.endText}>End conversation</Text>
                         </Pressable>
                       </View>
@@ -1673,7 +1799,7 @@ export default function App() {
                         <Text style={s.toggleTitle}>Why this appeared</Text>
                         <Text style={s.tiny}>{automaticExplanation}</Text>
                       </View>
-                      <Pressable onPress={() => setAutomaticExplanation("")}>
+                      <Pressable accessibilityRole="button" accessibilityLabel="Dismiss automatic suggestion explanation" hitSlop={12} onPress={() => setAutomaticExplanation("")}>
                         <Icon name="close" size={17} color={C.muted} />
                       </Pressable>
                     </View>
@@ -1683,6 +1809,9 @@ export default function App() {
                       cues.map((cue, i) => (
                         <Pressable
                           key={cue.id}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${cue.category} cue: ${cue.text}`}
+                          accessibilityHint="Speaks this cue aloud when voice output is enabled"
                           onPress={() => void play(cue)}
                           style={[
                             s.cueCard,
@@ -1777,6 +1906,7 @@ export default function App() {
                       <Text style={s.tiny}>Best with headphones</Text>
                     </View>
                     <Switch
+                      accessibilityLabel="Speak suggestions aloud"
                       value={voice}
                       onValueChange={(v) => {
                         setVoice(v);
@@ -1875,6 +2005,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 8,
     marginBottom: 8,
+    minHeight: 44,
   },
   navActive: { backgroundColor: "#EAF0E5" },
   navText: { fontSize: 12, color: C.muted, flex: 1 },
@@ -1894,6 +2025,7 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 9,
+    minHeight: 48,
   },
   avatar: {
     width: 34,
@@ -2152,6 +2284,7 @@ const s = StyleSheet.create({
     gap: 9,
     justifyContent: "center",
     alignItems: "center",
+    minHeight: 44,
   },
   buttonText: { color: "white", fontSize: 12, fontWeight: "600" },
   outline: {
@@ -2261,6 +2394,16 @@ const s = StyleSheet.create({
     gap: 10,
     marginBottom: 20,
   },
+  notice: {
+    backgroundColor: "#EEF3E8",
+    borderRadius: 9,
+    padding: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 20,
+  },
+  mobileNavItem: { minHeight: 44, justifyContent: "center" },
   liveBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -2335,8 +2478,8 @@ const s = StyleSheet.create({
     padding: 4,
   },
   send: {
-    width: 29,
-    height: 29,
+    width: 44,
+    height: 44,
     borderRadius: 6,
     backgroundColor: C.green,
     alignItems: "center",
@@ -2351,6 +2494,7 @@ const s = StyleSheet.create({
     flexWrap: "wrap",
   },
   endText: { fontSize: 11, color: C.muted, paddingVertical: 10 },
+  endButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: 8 },
   cueCard: {
     borderWidth: 1,
     borderColor: "#DDE5D5",
@@ -2415,4 +2559,5 @@ const s = StyleSheet.create({
   body: { fontSize: 14, color: C.muted, lineHeight: 25, marginVertical: 16 },
   infoRow: { flexDirection: "row", gap: 15, marginBottom: 24 },
   infoTitle: { fontSize: 15, color: C.ink, marginBottom: 7, fontWeight: "600" },
+  diagnostics: { backgroundColor: C.pale, borderRadius: 10, padding: 16, marginBottom: 20 },
 });

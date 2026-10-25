@@ -66,6 +66,16 @@ Request:
 
 Possible errors: `422` invalid input; storage/concurrency failures may surface as server errors or `409`.
 
+### `GET /session/{sid}/status`
+
+Revalidates a stored active-session capability during app recovery. Requires the session bearer token and returns no transcript, cue text, contact identity, or profile data.
+
+```json
+{"active":true,"mode":"demo","memory":"","signal":"low","has_context":false,"expires_at":1792944000.0}
+```
+
+The client restores display state only. It never resumes microphone capture automatically. Errors are the common session errors, including `401` for a wrong capability and `410` for an expired or ended session.
+
 ### `POST /session/{sid}/transcript`
 
 Adds recent text and updates the current assistance signal. Requires bearer token.

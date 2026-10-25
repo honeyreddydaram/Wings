@@ -92,7 +92,7 @@ Establish real user identity and persistent professional context while retaining
 - [x] Return generic authentication failures without leaking token-validation details.
 - [ ] Validate account creation, sign-in persistence, token refresh, sign-out, and expiry against a real Firebase project on Android.
 - [ ] Add email verification, password reset, MFA, OAuth providers, and account-recovery flows if required for the target release.
-- [ ] Move sensitive session capabilities to platform-secure storage before production use.
+- [x] Store native active-session capabilities in platform SecureStore and keep browser recovery tab-scoped.
 
 ### Persistent profiles
 
@@ -387,7 +387,7 @@ Deploy the system with measurable reliability, explicit retention and deletion b
 
 ## Milestone 8 — Integration, Testing, and Hackathon Demonstration
 
-**Status: Pending**
+**Status: Complete locally; physical-device, deployed-cloud, signed-build, and legal validation pending**
 
 ### Objective
 
@@ -395,50 +395,57 @@ Validate the complete Android experience, harden recovery paths, and deliver a p
 
 ### End-to-end validation
 
-- [ ] Test account creation, profile setup, session start, consent, recording, incremental transcription, manual help, automatic help, cue speech, summary, contact exchange, memory, deletion, and sign-out.
+- [x] Cover the credential-free profile, session start/recovery, transcript, manual cue, summary, card/contact exchange, memory, privacy inventory, deletion, and sign-out contracts in one end-to-end test.
+- [ ] Validate the full Firebase account, consented live recording/transcription, automatic help, and cue-speech journey on a physical Android device.
 - [ ] Test on multiple physical Android devices and supported OS versions.
 - [ ] Test wired headphones, Bluetooth headphones, speaker routing, and audio interruptions.
-- [ ] Test weak connectivity, offline transitions, request loss, retries, provider outages, token expiry, and app restarts.
-- [ ] Test long sessions, background/foreground transitions, screen locking, battery use, memory use, and thermal behavior.
-- [ ] Test accessibility: screen reader labels, focus order, contrast, touch targets, text scaling, and reduced motion where relevant.
+- [x] Add local contracts for request retry/idempotency, provider failure/fallback, token expiry, wrong capabilities, and restart recovery.
+- [ ] Validate shaped weak connectivity, offline transitions, request loss, provider outages, and restart recovery on physical devices.
+- [x] Add bounded long-session coverage and foreground-loss behavior that pauses capture and discards the unfinished chunk.
+- [ ] Measure screen locking, battery use, memory use, and thermal behavior on target devices.
+- [x] Add labels/states to primary controls, 44-point touch targets, darker contrast, and no required animation.
+- [ ] Validate TalkBack, focus order, 200% text scaling, contrast, and switch access on physical devices.
 
 ### Performance and reliability targets
 
-- [ ] Define and measure microphone-to-transcript latency.
-- [ ] Define and measure assistance-request-to-cue latency.
-- [ ] Define acceptable transcription loss, provider error, intervention, and crash rates.
-- [ ] Load-test concurrent sessions within the intended demonstration scale.
+- [x] Define microphone-to-transcript p95 and implement bounded in-session measurement.
+- [x] Define assistance-request-to-cue p95 and implement bounded in-session measurement.
+- [x] Define acceptable transcription loss, provider error, intervention, and crash targets.
+- [x] Load-test twenty concurrent credential-free sessions within the intended demonstration scale.
+- [ ] Measure the latency, loss, error, crash, battery, memory, and thermal targets on deployed services and physical devices.
 - [ ] Verify quotas and cost budgets under rehearsal traffic.
 
 ### Demonstration readiness
 
-- [ ] Create a repeatable demo scenario with clear participant consent.
-- [ ] Prepare deterministic fallback data for unreliable venue connectivity.
-- [ ] Show recording, pause, privacy, and delete controls during the demonstration.
-- [ ] Clearly distinguish implemented behavior, simulated fallback behavior, and future work.
-- [ ] Prepare screenshots, architecture diagrams, setup instructions, troubleshooting notes, and a concise demo script.
+- [x] Create a repeatable demo scenario with clear participant-consent language.
+- [x] Prepare deterministic fallback data for unreliable venue connectivity.
+- [x] Expose recording, pause, privacy, diagnostics, and delete controls in the application.
+- [x] Clearly distinguish implemented behavior, simulated fallback behavior, and future work.
+- [x] Prepare a screenshot, architecture diagrams, setup instructions, troubleshooting notes, and a concise demo script.
 - [ ] Produce and install a signed Android preview/release build.
-- [ ] Complete final regression, security, privacy, and dependency reviews.
+- [x] Complete local regression, security, privacy, and dependency reviews.
+- [ ] Complete deployed-environment and privacy/legal release reviews.
 
 ### Exit criteria
 
 - [ ] The primary demo succeeds repeatedly on a physical Android device.
-- [ ] The offline/degraded fallback succeeds without cloud credentials.
-- [ ] Critical recovery and deletion flows are demonstrated.
-- [ ] Documentation matches the released behavior with no unsupported claims.
+- [x] The offline/degraded fallback succeeds without cloud credentials in local browser and API validation.
+- [x] Critical recovery and deletion flows have local contract coverage.
+- [x] Documentation matches implemented repository behavior without claiming external validation.
 
 ---
 
 ## Current next actions
 
-1. Begin Milestone 8 integration, recovery, accessibility, performance, and demonstration validation.
-2. Provision separate development and production-like Google Cloud projects and execute the M2–M7 external checks.
-3. Validate Firebase, Speech-to-Text, Gemma, QR/audio/device behavior, telemetry export, alerts, backup/restore, and deletion with non-production data.
+1. Build and install the signed preview APK, then execute the physical-device rows in `docs/TEST_MATRIX.md` on each target Android/OS combination.
+2. Provision separate development and production-like Google Cloud projects and execute the M2–M8 external checks.
+3. Validate Firebase, Speech-to-Text, Gemma, QR/audio/device behavior, recovery, telemetry export, alerts, backup/restore, deletion, latency, quota, and cost with non-production data.
 4. Complete privacy/legal, IAM, dependency-exception, and threat-model reviews before real-conversation use.
 
 ## Current validation snapshot
 
-- [x] Backend test suite: 22 tests passing across M1–M7 privacy, deletion, telemetry, inference, audio, card, and contact contracts.
+- [x] Backend test suite: 26 tests passing across M1–M8 privacy, deletion, telemetry, inference, audio, card, contact, recovery, long-session, and concurrency contracts.
+- [x] Mobile unit suite: 8 tests passing across difficulty detection, performance measurement, and session storage.
 - [x] TypeScript type checking passing.
 - [x] Expo web export passing.
 - [x] Expo Android export passing.
@@ -447,4 +454,5 @@ Validate the complete Android experience, harden recovery paths, and deliver a p
 - [ ] Deployed Firebase/Google Cloud end-to-end test.
 - [ ] Physical Android audio and authentication test.
 - [x] Local M7 security, privacy, retention, observability, deployment, smoke, rollback, and runbook implementation.
+- [x] Local M8 integration, recovery, accessibility, performance, and demonstration implementation.
 - [ ] Deployed production-like security, privacy, retention, observability, restore, alert, cost, and performance validation.

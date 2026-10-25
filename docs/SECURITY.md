@@ -5,6 +5,7 @@ This is a hackathon baseline, not a claim of production-grade security or legal 
 ## Implemented controls
 
 - Session tokens use cryptographically random values, are returned to the client once, persisted only as SHA-256 hashes, and compared with constant-time comparison.
+- Native active-session capabilities are stored with Expo SecureStore using this-device-only, unlocked-device accessibility. Browser recovery is tab-scoped through `sessionStorage`; sign-out, completion, erasure, expiry, and invalid capabilities clear it.
 - Session operations enforce token validity, two-hour expiry, ended state, isolation, optimistic record versions, and a persisted 40-request/minute/session limit.
 - Inputs have Pydantic bounds; audio uploads have a configurable byte limit.
 - CORS uses configured exact origins rather than a wildcard default.
@@ -40,7 +41,7 @@ Firestore session writes use centrally configured one-day TTL fields, while appl
 
 - Demo mode still uses a client-generated owner capability and must not be exposed as production authentication.
 - The in-process edge limit is per Cloud Run instance; no distributed Cloud Armor/API Gateway or bot protection has been deployed.
-- Session capability tokens live in React state; Firebase sign-in persistence uses browser storage or native AsyncStorage, which is not equivalent to hardware-backed secret storage.
+- Firebase sign-in persistence uses browser storage or native AsyncStorage; its protection remains governed by Firebase and platform behavior rather than the active-session SecureStore policy.
 - Firestore and Cloud Storage security rules/IAM have not been validated in a deployed project.
 - Encryption-key management remains provider-managed; no customer-managed key design has been reviewed.
 - Account deletion cannot erase provider transient copies beyond supported application stores; provider terms still apply.

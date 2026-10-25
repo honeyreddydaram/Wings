@@ -30,6 +30,8 @@ flowchart TB
 
 With Firebase configured, the Expo client persists its Firebase sign-in, sends an ID token to profile routes and session creation, and receives a separate session capability for conversation operations. The backend verifies the ID token and uses its UID for profile and contact-note ownership. Demo mode replaces this with a persistent local device capability and is explicitly non-production.
 
+For active-session recovery, native clients keep the bounded capability and display state in Expo SecureStore; web uses tab-scoped session storage. A restart revalidates the capability through the status endpoint before restoring state. Recording is never resumed automatically, and leaving the foreground pauses capture and discards the unfinished chunk. Sign-out, completion, erasure, expiry, and invalid capabilities clear recovery data.
+
 In live mode, M3 gates microphone capture on participant-awareness confirmation and permission, then records ordered four-second M4A/WebM files. Uploads are serialized while capture rolls forward; successful transcripts enter the same bounded-context path as typed fragments. Chunk indexes make accepted retries idempotent. Device speech reads cues on Android and web without exposing a session capability in an audio URL.
 
 The FastAPI application hashes session tokens before persistence, enforces a two-hour session expiry and per-session request count, and stores state through SQLite in demo mode or Firestore when configured. Active context consists of a bounded summary plus recent fragments. Cue generation uses deterministic demo rules by default or the provider-specific Vertex AI Gemma adapter in live mode. Gemini remains a distinct compatibility adapter. Invalid or unavailable provider output falls back to deterministic bounded cues.
@@ -41,7 +43,7 @@ The backend remains one deployable service. This is intentional for a hackathon:
 | Boundary | Current implementation | Later evolution |
 |---|---|---|
 | Client/API | REST from one Expo screen plus isolated rolling-audio hook | Native PCM/WebSocket transport only if device testing justifies it |
-| Identity | Firebase Authentication when configured; persistent demo device capability locally; separate session token; full account erasure endpoint | OAuth providers, recovery flows, and stronger device secret storage |
+| Identity | Firebase Authentication when configured; persistent demo device capability locally; SecureStore-backed native active-session token; full account erasure endpoint | OAuth providers and account-recovery flows |
 | Session storage | SQLite or Firestore record adapter in `main.py` | Extract a repository when profile/session schemas evolve |
 | Transcription | Ordered near-real-time chunks to Google Speech-to-Text V2 | Physical-device validation; optional native raw stream later |
 | Assistance signal | Local bounded metering/transcript-derived score plus manual help | Physical-device calibration and venue evaluation |
@@ -75,4 +77,4 @@ Raw uploaded audio is held in memory and cleared after the request. Recent trans
 
 ## Milestone sequence
 
-M1 established the foundation; M2 added Firebase authentication and profiles; M3 added rolling audio, incremental transcription, and device voice; M4 implemented conservative assistance signals; M5 added Gemma; M6 added digital identity/contact exchange; M7 added local telemetry, privacy controls, operational safeguards, and deployment automation. M8 integrates and validates the system end to end on deployed services and physical devices.
+M1 established the foundation; M2 added Firebase authentication and profiles; M3 added rolling audio, incremental transcription, and device voice; M4 implemented conservative assistance signals; M5 added Gemma; M6 added digital identity/contact exchange; M7 added local telemetry, privacy controls, operational safeguards, and deployment automation. M8 adds local end-to-end integration coverage, secure session recovery, performance diagnostics, accessibility hardening, and a repeatable demonstration package. Its deployed-service and physical-device acceptance checks remain external release work.

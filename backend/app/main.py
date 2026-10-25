@@ -467,6 +467,18 @@ def start(body: Start, request: Request):
     write('session:'+state['id'],state)
     return {'id':sid,'token':token,'memory':state['memory'],'mode':MODE}
 
+@app.get('/session/{sid}/status')
+def session_status(sid: str, request: Request):
+    state = authorize(sid, request)
+    return {
+        'active': True,
+        'mode': MODE,
+        'memory': state.get('memory', ''),
+        'signal': state.get('signal', 'low'),
+        'has_context': bool(state.get('summary') or state.get('fragments')),
+        'expires_at': state['expires'],
+    }
+
 async def ingest_fragment(state: dict, body: Fragment, background_tasks: BackgroundTasks | None = None):
     state['fragments'].append(body.text.strip())
     joined = ' '.join(state['fragments'])
