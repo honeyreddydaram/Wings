@@ -2,7 +2,7 @@
 
 ## Provider decision
 
-The supported Gemma path is `google/gemma-3-27b-it` through Vertex AI Model Garden's OpenAI-compatible chat-completions endpoint in the `global` location. The backend authenticates with Google Application Default Credentials and the Cloud Run runtime service account; no model API key is placed in the client. `GEMMA_BASE_URL` can point to another OpenAI-compatible, authorized host such as a future NaviGator endpoint, but compatibility must be verified before use.
+The supported Gemma path is `google/gemma-4-12b` through a dedicated Vertex AI vLLM endpoint in the `us-central1` location (or configurable regional endpoint). The backend authenticates with Google Application Default Credentials and the Cloud Run runtime service account; no model API key is placed in the client. `GEMMA_ENDPOINT_ID`, `GEMMA_ENDPOINT_DNS`, or `GEMMA_BASE_URL` can point to the dedicated endpoint DNS (e.g. `<endpoint-id>.us-central1-<project-number>.prediction.vertexai.goog`), but compatibility must be verified before use.
 
 The deployed project must enable `aiplatform.googleapis.com` and grant the runtime identity `roles/aiplatform.user`. Model availability, acceptable-use terms, quota, token pricing, regional processing, cold-start behavior, and concurrency have not been verified against a real project. Check the current Vertex AI model card, quota page, and pricing page before deployment; these can change independently of the repository.
 

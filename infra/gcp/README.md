@@ -4,7 +4,7 @@ Transcription configuration: enable `speech.googleapis.com`; grant the runtime s
 
 This integration uses synchronous recognition of completed recordings, not streaming. Keep chunks under 60 seconds and 8 MB. Browser WebM/Opus and native audio formats need live-device verification with Chirp 3. `/readyz` checks Firestore and inference authentication only; a successful audio request is required to validate Speech permissions, quota and model availability. Cloud transcription has not yet been tested with project credentials.
 
-The active deployment targets Cloud Run for the API and web app and Firestore for session state and personal notes. Vertex AI Gemma 3 27B IT generates cues and summaries using the Cloud Run service account; Google Speech-to-Text V2 Chirp 3 transcribes audio. Device speech provides cue voice. SQLite demo mode still works without cloud credentials.
+The active deployment targets Cloud Run for the API and web app and Firestore for session state and personal notes. Vertex AI Gemma 4 12B generates cues and summaries using the Cloud Run service account via a dedicated endpoint; Google Speech-to-Text V2 Chirp 3 transcribes audio. Device speech provides cue voice. SQLite demo mode still works without cloud credentials.
 
 The API also serves public digital-card pages, QR images, and vCards. `PUBLIC_BASE_URL` must be its externally reachable HTTPS origin; `deploy.sh` updates this automatically after Cloud Run assigns the API URL. Public card routes are intentionally unauthenticated, while card editing and exchanged-contact routes use Firebase identity in a production configuration.
 

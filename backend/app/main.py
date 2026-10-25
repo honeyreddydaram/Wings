@@ -216,6 +216,7 @@ async def summarize(text):
     with observe('summary.generate', component='summary', operation='generate', provider=settings.inference_provider):
         return await summarize_text(settings, text)
 
+@app.get('/health')
 @app.get('/healthz')
 def health():
     return {'status':'ok', 'mode':MODE}

@@ -12,10 +12,12 @@ from app.services.context import build_cue_prompt
 from app.services.inference import (
     InferenceUnavailable,
     _gemma_request,
+    clean_json_output,
+    demo_cues,
     generate_text,
     reset_circuit,
+    resolve_gemma_url,
     validate_cues,
-    demo_cues,
 )
 
 
@@ -23,8 +25,10 @@ def gemma_settings(**changes):
     values = {
         "inference_provider": "gemma",
         "google_cloud_project": "test-project",
-        "gemma_location": "global",
-        "gemma_model": "google/gemma-3-27b-it",
+        "gemma_location": "us-central1",
+        "gemma_model": "google/gemma-4-12b",
+        "gemma_endpoint_id": None,
+        "gemma_endpoint_dns": None,
         "gemma_base_url": None,
         "inference_max_retries": 2,
     }
@@ -32,25 +36,92 @@ def gemma_settings(**changes):
     return replace(settings, **values)
 
 
+def test_resolve_gemma_url_routes_correctly():
+    # 1. Base URL override
+    s1 = gemma_settings(gemma_base_url="https://custom-proxy.internal/v1/chat/completions")
+    assert resolve_gemma_url(s1) == "https://custom-proxy.internal/v1/chat/completions"
+
+    # 2. Dedicated endpoint DNS + Endpoint ID (rawPredict)
+    s2 = gemma_settings(
+        gemma_endpoint_dns="123456.us-central1-987654.prediction.vertexai.goog",
+        gemma_endpoint_id="123456",
+        gemma_location="us-central1",
+    )
+    assert resolve_gemma_url(s2) == "https://123456.us-central1-987654.prediction.vertexai.goog/v1/projects/test-project/locations/us-central1/endpoints/123456:rawPredict"
+
+    # 3. Numeric endpoint ID alone (regional rawPredict)
+    s3 = gemma_settings(gemma_endpoint_id="1234567890", gemma_location="us-central1")
+    assert resolve_gemma_url(s3) == "https://us-central1-aiplatform.googleapis.com/v1/projects/test-project/locations/us-central1/endpoints/1234567890:rawPredict"
+
+    # 4. Regional openapi fallback
+    s4 = gemma_settings(gemma_location="us-central1")
+    assert resolve_gemma_url(s4) == "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/test-project/locations/us-central1/endpoints/openapi/chat/completions"
+
+    # 5. Global openapi fallback
+    s5 = gemma_settings(gemma_location="global")
+    assert resolve_gemma_url(s5) == "https://aiplatform.googleapis.com/v1beta1/projects/test-project/locations/global/endpoints/openapi/chat/completions"
+
+
+def test_clean_json_output_strips_markdown_fences():
+    assert clean_json_output('{"cues":[]}') == '{"cues":[]}'
+    assert clean_json_output('```json\n{"cues":[]}\n```') == '{"cues":[]}'
+    assert clean_json_output('```\n{"cues":[]}\n```') == '{"cues":[]}'
+
+
 def test_vertex_gemma_uses_openai_contract_and_adc():
     response = MagicMock()
     response.raise_for_status.return_value = None
-    response.json.return_value = {"choices": [{"message": {"content": '{"cues":[]}'}}]}
+    response.json.return_value = {"choices": [{"message": {"content": '```json\n{"cues":[]}\n```'}}]}
     client = AsyncMock()
     client.__aenter__.return_value = client
     client.__aexit__.return_value = None
     client.post.return_value = response
+    cfg = gemma_settings(
+        gemma_base_url="https://managed.endpoint/chat/completions",
+        gemma_model="google/gemma-4-12b",
+    )
     with patch("app.services.inference._refresh_google_token", return_value="adc-token"), patch(
         "app.services.inference.httpx.AsyncClient", return_value=client
     ):
-        result = asyncio.run(_gemma_request(gemma_settings(), "prompt", {"type": "object"}))
+        result = asyncio.run(_gemma_request(cfg, "prompt", {"type": "object"}))
     assert result == '{"cues":[]}'
     url = client.post.call_args.args[0]
     request = client.post.call_args.kwargs
-    assert url.endswith("/locations/global/endpoints/openapi/chat/completions")
+    assert url == "https://managed.endpoint/chat/completions"
     assert request["headers"] == {"Authorization": "Bearer adc-token"}
-    assert request["json"]["model"] == "google/gemma-3-27b-it"
+    assert request["json"]["model"] == "google/gemma-4-12b"
     assert request["json"]["response_format"] == {"type": "json_object"}
+
+
+def test_vertex_gemma_handles_rawpredict_predictions_format():
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {"predictions": ["Prompt:\nHello\nOutput:\n```json\n{\"cues\":[]}\n```"]}
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.__aexit__.return_value = None
+    client.post.return_value = response
+    cfg = gemma_settings(
+        gemma_endpoint_dns="123456.us-central1-987654.prediction.vertexai.goog",
+        gemma_endpoint_id="123456",
+        gemma_model="google/gemma-4-12b",
+    )
+    with patch("app.services.inference._refresh_google_token", return_value="adc-token"), patch(
+        "app.services.inference.httpx.AsyncClient", return_value=client
+    ):
+        result = asyncio.run(_gemma_request(cfg, "prompt", {"type": "object"}))
+    assert result == '{"cues":[]}'
+    url = client.post.call_args.args[0]
+    request = client.post.call_args.kwargs
+    assert url.endswith(":rawPredict")
+    assert request["headers"] == {"Authorization": "Bearer adc-token"}
+    assert request["json"]["stop"] == ["<end_of_turn>", "<start_of_turn>", "<eos>"]
+
+
+def test_gemma_auth_failure_raises_inference_unavailable():
+    with patch("app.services.inference._refresh_google_token", side_effect=InferenceUnavailable("Token error")):
+        with pytest.raises(InferenceUnavailable, match="Inference provider unavailable"):
+            asyncio.run(generate_text(gemma_settings(), "prompt"))
 
 
 def test_retry_and_circuit_breaker():

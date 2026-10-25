@@ -32,6 +32,8 @@ class Settings:
     inference_model: str
     gemma_model: str
     gemma_location: str
+    gemma_endpoint_id: str | None
+    gemma_endpoint_dns: str | None
     gemma_base_url: str | None
     inference_timeout_seconds: float
     inference_max_retries: int
@@ -71,8 +73,10 @@ def load_settings() -> Settings:
         inference_provider=provider,
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         inference_model=os.getenv("INFERENCE_MODEL", os.getenv("GEMINI_MODEL", "gemini-2.5-flash")),
-        gemma_model=os.getenv("GEMMA_MODEL", "google/gemma-3-27b-it"),
-        gemma_location=os.getenv("GEMMA_LOCATION", "global"),
+        gemma_model=os.getenv("GEMMA_MODEL", "google/gemma-4-12b"),
+        gemma_location=os.getenv("GEMMA_LOCATION", "us-central1"),
+        gemma_endpoint_id=os.getenv("GEMMA_ENDPOINT_ID"),
+        gemma_endpoint_dns=os.getenv("GEMMA_ENDPOINT_DNS"),
         gemma_base_url=os.getenv("GEMMA_BASE_URL"),
         inference_timeout_seconds=float(os.getenv("INFERENCE_TIMEOUT_SECONDS", "20")),
         inference_max_retries=int(os.getenv("INFERENCE_MAX_RETRIES", "2")),

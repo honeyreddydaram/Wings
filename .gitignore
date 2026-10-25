@@ -1,6 +1,9 @@
 node_modules/
 .expo/
 dist/
+mobile/dist/
+._*
+.DS_Store
 .venv/
 __pycache__/
 .pytest_cache/

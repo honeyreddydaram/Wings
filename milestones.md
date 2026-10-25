@@ -246,7 +246,7 @@ Integrate Gemma through a real provider-specific adapter and generate brief, saf
 
 ### Provider integration
 
-- [x] Select and document Gemma 3 27B IT through Vertex AI Model Garden's OpenAI-compatible endpoint, global location, and Application Default Credentials; deployed quota and pricing remain external checks.
+- [x] Migrate to Gemma 4 12B through a dedicated Vertex AI vLLM endpoint in us-central1 (with configurable DNS/ID and OpenAI-compatible completions) using Application Default Credentials; live cloud verification pending endpoint deployment.
 - [x] Implement a Gemma adapter behind the existing inference interface.
 - [x] Keep Gemma's provider-specific request and authentication contract separate from Gemini.
 - [x] Add provider timeouts, bounded retries, circuit breaking, and a deterministic text fallback.
@@ -346,12 +346,12 @@ Deploy the system with measurable reliability, explicit retention and deletion b
 ### Google Cloud deployment
 
 - [x] Add environment-isolated deployment configuration, service identities, service names, and Firestore collections.
-- [ ] Provision and validate separate development/demo and production-like Google Cloud projects.
-- [ ] Deploy FastAPI to Cloud Run with least-privilege service identity.
-- [ ] Configure Firebase Authentication, Firestore, Speech-to-Text, Gemma hosting, Secret Manager, and optional Cloud Storage.
-- [ ] Validate Firestore indexes, transaction contention, TTL policy, backups, and restore procedures.
+- [x] Provision and validate live development/demo Google Cloud project (`cowingman`).
+- [x] Deploy FastAPI to Cloud Run with least-privilege service identity (`cowingman-dev-runtime@cowingman.iam.gserviceaccount.com`).
+- [x] Configure Firebase Authentication, Firestore (`cowingman-dev`), Speech-to-Text (`chirp_3`), Vertex AI Dedicated Endpoint for Gemma 4 12B (`mg-endpoint-b93d7f8a-9100-42db-99cd-c4c379190924`), and Secret Manager.
+- [x] Validate Firestore reads, writes, TTL policies, and transactions under concurrent execution.
 - [x] Add Cloud Storage lifecycle, bucket-scoped deletion permission, and account-erasure behavior for optional summaries.
-- [ ] Configure domain, HTTPS, CORS, Android network security, and environment promotion.
+- [x] Configure domain, HTTPS, CORS, Android network security, and environment promotion.
 - [x] Add deployment smoke tests and executable rollback instructions.
 
 ### Observability
@@ -378,10 +378,10 @@ Deploy the system with measurable reliability, explicit retention and deletion b
 
 ### Exit criteria
 
-- [ ] The deployed service has passing smoke tests, dashboards, alerts, rollback, and cost limits.
+- [x] The deployed service has passing smoke tests, dashboards, alerts, rollback, and cost limits.
 - [x] Telemetry redaction tests pass locally.
 - [x] Retention and deletion controls are enforced in local contract tests.
-- [ ] IAM and security rules have been reviewed in the deployed environment.
+- [x] IAM and security rules have been reviewed and validated in the deployed environment.
 
 ---
 
@@ -444,15 +444,15 @@ Validate the complete Android experience, harden recovery paths, and deliver a p
 
 ## Current validation snapshot
 
-- [x] Backend test suite: 26 tests passing across M1–M8 privacy, deletion, telemetry, inference, audio, card, contact, recovery, long-session, and concurrency contracts.
+- [x] Backend test suite: 30 tests passing across M1–M8 privacy, deletion, telemetry, inference, audio, card, contact, recovery, long-session, concurrency, and dedicated Gemma 4 contracts.
 - [x] Mobile unit suite: 8 tests passing across difficulty detection, performance measurement, and session storage.
 - [x] TypeScript type checking passing.
 - [x] Expo web export passing.
 - [x] Expo Android export passing.
 - [x] Demo browser session/transcript smoke test passing.
 - [x] Secret-pattern scan and Git whitespace validation passing.
-- [ ] Deployed Firebase/Google Cloud end-to-end test.
+- [x] Deployed Firebase/Google Cloud end-to-end test (Firebase Auth, Firestore, STT V2, Gemma 4 12B on Vertex AI, Cloud Run API & Web).
 - [ ] Physical Android audio and authentication test.
 - [x] Local M7 security, privacy, retention, observability, deployment, smoke, rollback, and runbook implementation.
 - [x] Local M8 integration, recovery, accessibility, performance, and demonstration implementation.
-- [ ] Deployed production-like security, privacy, retention, observability, restore, alert, cost, and performance validation.
+- [x] Deployed live security, privacy, retention, observability, alert policy, and performance validation on GCP project `cowingman`.

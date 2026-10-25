@@ -41,7 +41,7 @@ class BudgetExceeded(RuntimeError):
 def install_edge_limits(app: FastAPI, settings: Settings) -> None:
     @app.middleware("http")
     async def edge_limit(request: Request, call_next):
-        if request.url.path in {"/healthz", "/readyz"}:
+        if request.url.path in {"/health", "/healthz", "/readyz"}:
             return await call_next(request)
         address = request.client.host if request.client else "unknown"
         if not edge_limiter.allow(address, settings.edge_rate_limit_per_minute):

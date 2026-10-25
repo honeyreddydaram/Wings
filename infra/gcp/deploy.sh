@@ -34,11 +34,26 @@ gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$ACCO
 gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$ACCOUNT" --role=roles/logging.logWriter --condition=None >/dev/null
 gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$ACCOUNT" --role=roles/monitoring.metricWriter --condition=None >/dev/null
 gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$ACCOUNT" --role=roles/cloudtrace.agent --condition=None >/dev/null
+if [ "$AUTH_MODE" = "firebase" ]; then
+  gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$ACCOUNT" --role=roles/firebaseauth.admin --condition=None >/dev/null
+fi
 if ! gcloud firestore databases describe --database='(default)' --project "$PROJECT" >/dev/null 2>&1; then
   gcloud firestore databases create --database='(default)' --location="$REGION" --type=firestore-native --project "$PROJECT"
 fi
-gcloud firestore fields ttls update expires_at --collection-group="cowingman-$SERVICE_SUFFIX" --enable-ttl --project "$PROJECT"
-RUNTIME_ENV="APP_MODE=live,AUTH_MODE=$AUTH_MODE,FIREBASE_PROJECT_ID=$PROJECT,FIRESTORE_COLLECTION=cowingman-$SERVICE_SUFFIX,GOOGLE_CLOUD_PROJECT=$PROJECT,SPEECH_LOCATION=us,SPEECH_LANGUAGE=en-US,INFERENCE_PROVIDER=gemma,GEMMA_MODEL=google/gemma-3-27b-it,GEMMA_LOCATION=global,LOG_FORMAT=json,SESSION_ACCESS_TTL_HOURS=2,SESSION_STORAGE_TTL_DAYS=1,SUMMARY_OBJECT_TTL_DAYS=30,EDGE_RATE_LIMIT_PER_MINUTE=180,PROVIDER_BUDGET_PER_MINUTE=60"
+gcloud firestore fields ttls update expires_at --collection-group="cowingman-$SERVICE_SUFFIX" --enable-ttl --project "$PROJECT" --async || true
+GEMMA_MODEL="${GEMMA_MODEL:-google/gemma-4-12b}"
+GEMMA_LOCATION="${GEMMA_LOCATION:-us-central1}"
+INFERENCE_PROVIDER="${INFERENCE_PROVIDER:-gemma}"
+RUNTIME_ENV="APP_MODE=live,AUTH_MODE=$AUTH_MODE,FIREBASE_PROJECT_ID=$PROJECT,FIRESTORE_COLLECTION=cowingman-$SERVICE_SUFFIX,GOOGLE_CLOUD_PROJECT=$PROJECT,SPEECH_LOCATION=us,SPEECH_LANGUAGE=en-US,INFERENCE_PROVIDER=$INFERENCE_PROVIDER,GEMMA_MODEL=$GEMMA_MODEL,GEMMA_LOCATION=$GEMMA_LOCATION,LOG_FORMAT=json,SESSION_ACCESS_TTL_HOURS=2,SESSION_STORAGE_TTL_DAYS=1,SUMMARY_OBJECT_TTL_DAYS=30,EDGE_RATE_LIMIT_PER_MINUTE=180,PROVIDER_BUDGET_PER_MINUTE=60"
+if [[ -n "${GEMMA_ENDPOINT_ID:-}" ]]; then
+  RUNTIME_ENV="$RUNTIME_ENV,GEMMA_ENDPOINT_ID=$GEMMA_ENDPOINT_ID"
+fi
+if [[ -n "${GEMMA_ENDPOINT_DNS:-}" ]]; then
+  RUNTIME_ENV="$RUNTIME_ENV,GEMMA_ENDPOINT_DNS=$GEMMA_ENDPOINT_DNS"
+fi
+if [[ -n "${GEMMA_BASE_URL:-}" ]]; then
+  RUNTIME_ENV="$RUNTIME_ENV,GEMMA_BASE_URL=$GEMMA_BASE_URL"
+fi
 if [[ -n "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" ]]; then
   RUNTIME_ENV="$RUNTIME_ENV,OTEL_ENABLED=true,OTEL_SERVICE_NAME=$API_SERVICE,OTEL_EXPORTER_OTLP_ENDPOINT=$OTEL_EXPORTER_OTLP_ENDPOINT,OTEL_SAMPLE_RATIO=${OTEL_SAMPLE_RATIO:-0.1}"
 fi
@@ -58,7 +73,7 @@ fi
 gcloud "${DEPLOY_ARGS[@]}"
 API_URL="$(gcloud run services describe "$API_SERVICE" --region "$REGION" --project "$PROJECT" --format='value(status.url)')"
 gcloud run services update "$API_SERVICE" --region "$REGION" --project "$PROJECT" --update-env-vars "PUBLIC_BASE_URL=$API_URL"
-EXPO_PUBLIC_API_URL="$API_URL" EXPO_HOME=/tmp/wings-expo EXPO_NO_TELEMETRY=1 npm run build --prefix mobile
+EXPO_PUBLIC_API_URL="$API_URL" EXPO_HOME=/tmp/wings-expo EXPO_NO_TELEMETRY=1 npm run build --prefix mobile -- --clear
 STAGING="$(mktemp -d /tmp/cowingman-web.XXXXXX)"
 mkdir -p "$STAGING/mobile"
 cp -R mobile/dist "$STAGING/mobile/dist"
