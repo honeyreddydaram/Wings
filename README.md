@@ -1,6 +1,6 @@
 # Co-Wingman (Wings)
 
-Co-Wingman is an Android-first conversation assistant that offers short questions and gentle suggestions while keeping the person—not the assistant—at the center. This repository is a working local MVP and the Milestone 1 foundation for the Gator Hacks project.
+Co-Wingman is an Android-first conversation assistant that offers short questions and gentle suggestions while keeping the person—not the assistant—at the center. This repository is a working local MVP with Milestones 1 and 2 implemented for the Gator Hacks project.
 
 The default configuration is an explicit demo: SQLite storage, preset topic-based cues, keyword summaries, and device speech. It needs no cloud account and makes no AI calls. Live integrations exist for Gemini, Google Speech-to-Text, Firestore, and optional Cloud Storage, but require credentials and have not been production-validated. Gemma is an architectural target for Milestone 5, not an implemented provider.
 
@@ -8,12 +8,12 @@ The default configuration is an explicit demo: SQLite storage, preset topic-base
 
 - `mobile/`: Expo, React Native, and TypeScript client; Android first, with a web development target.
 - `backend/app/main.py`: FastAPI routes, session authorization, and current storage coordination.
-- `backend/app/core/`: centralized startup configuration and privacy-safe structured logging.
+- `backend/app/core/`: centralized configuration, Firebase/demo authentication, and privacy-safe structured logging.
 - `backend/app/services/`: replaceable inference and summary boundaries.
 - `backend/app/speech.py`: Google Speech-to-Text adapter for completed audio chunks.
 - `infra/gcp/`: reference Cloud Run deployment files; no deployment is implied.
 
-See [Architecture](docs/ARCHITECTURE.md), [API contracts](docs/API.md), [repository audit](docs/REPOSITORY_AUDIT.md), [observability](docs/OBSERVABILITY.md), and [security](docs/SECURITY.md).
+See [Architecture](docs/ARCHITECTURE.md), [API contracts](docs/API.md), [Milestone 2 scope](docs/MILESTONE_2.md), [repository audit](docs/REPOSITORY_AUDIT.md), [observability](docs/OBSERVABILITY.md), and [security](docs/SECURITY.md).
 
 ## Requirements
 
@@ -32,7 +32,7 @@ python3.12 -m venv .venv
 npm ci --prefix mobile --cache /tmp/wings-npm-cache
 ```
 
-Configuration is read from exported environment variables at process startup. The application deliberately does not auto-load `.env` files. Use `backend/.env.example` as a reference and export values through your shell or runtime; never commit a populated `.env`.
+Configuration is read from exported environment variables at process startup. The application deliberately does not auto-load `.env` files. Use `backend/.env.example` and `mobile/.env.example` as references; never commit populated environment files.
 
 ## Run the backend
 
@@ -69,12 +69,27 @@ For native development, run `npx expo start`. A physical device cannot reach you
 
 Demo mode does not record or transcribe microphone audio, call cloud AI, diagnose anxiety, or simulate the future four-second audio classifier.
 
+The Profile screen persists professional context locally in demo mode. On native devices, the demo identity now survives restarts through AsyncStorage.
+
+## Firebase authentication
+
+Firebase mode supports email/password account creation, persistent client sign-in, backend ID-token verification, and user-isolated profiles. Enable Email/Password in Firebase Authentication, register a Firebase web app, and export its public client configuration from `mobile/.env.example`. Then start the API with:
+
+```bash
+APP_MODE=demo AUTH_MODE=firebase FIREBASE_PROJECT_ID=your-project-id \
+  GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json \
+  .venv/bin/uvicorn app.main:app --app-dir backend --port 8000
+```
+
+Application Default Credentials are preferred on Google Cloud. The Firebase web API key is a client identifier—not a server secret—but it should still be restricted to the required APIs and applications. Never place service-account JSON or Gemini credentials in `EXPO_PUBLIC_*` variables.
+
 ## Validate
 
 ```bash
 APP_MODE=demo .venv/bin/pytest backend -q
 npm run typecheck --prefix mobile
 EXPO_HOME=/tmp/wings-expo EXPO_NO_TELEMETRY=1 npm run build --prefix mobile
+cd mobile && EXPO_HOME=/tmp/wings-expo EXPO_NO_TELEMETRY=1 npx expo export --platform android --output-dir /tmp/wings-android-export
 ```
 
 CI runs the same checks on every push and pull request without cloud credentials.
@@ -84,6 +99,7 @@ CI runs the same checks on every push and pull request without cloud credentials
 The complete annotated list is in `backend/.env.example`. Key groups are:
 
 - Runtime/storage: `APP_MODE`, `DATABASE_PATH`, `FIRESTORE_COLLECTION`, `SUMMARY_BUCKET`.
+- Identity: `AUTH_MODE`, `FIREBASE_PROJECT_ID`, and optional `FIREBASE_CHECK_REVOKED`.
 - Browser access: `CORS_ORIGINS` (comma-separated exact origins).
 - AI: `INFERENCE_PROVIDER`, `INFERENCE_MODEL`, `TTS_MODEL`, and server-only `GEMINI_API_KEY`.
 - Google speech: `GOOGLE_CLOUD_PROJECT`, `SPEECH_LOCATION`, `SPEECH_LANGUAGE`.
@@ -98,13 +114,14 @@ Use `APP_MODE=live`, a Firestore collection, and `INFERENCE_PROVIDER=gemini` onl
 - **Expo cannot reach the API:** verify `EXPO_PUBLIC_API_URL`; use your machine’s reachable address on a physical device and configure `CORS_ORIGINS` for web.
 - **CORS failure:** list the exact frontend origin, including port, then restart the backend because settings load at startup.
 - **Live startup fails:** `APP_MODE=live` requires `FIRESTORE_COLLECTION`; provider calls additionally require credentials and permissions.
+- **Profile returns 401:** client and backend auth modes must match. Firebase mode requires a signed-in user and server credentials capable of verifying ID tokens.
 - **Audio returns 503 in demo:** expected; use the sample transcript. Live transcription accepts completed chunks only, up to the configured byte limit.
 - **Node version error:** use Node 20.19+ and reinstall with `npm ci`.
 
 ## Current limitations and next milestones
 
-Session tokens are local capabilities, not user accounts. Native identity is not durable, live providers need device/cloud validation, and there is no continuous streaming, clinical anxiety detection, NFC exchange, résumé ingestion, production alerting, or deployed dashboard. Operational logs are structured and omit request bodies and credentials, but full tracing/metrics arrives in Milestone 7.
+Firebase authentication and persistent profiles are implemented but still need validation against a real Firebase project and Android build. Session capability tokens remain in memory, and there is no continuous streaming, clinical anxiety detection, NFC exchange, résumé-file ingestion, production alerting, or deployed dashboard. Operational logs are structured and omit request bodies and credentials, but full tracing/metrics arrives in Milestone 7.
 
-Milestone 2 should begin with Firebase Authentication and persistent user-profile contracts while retaining the inference, summary, storage, and telemetry seams established here. The remaining roadmap is described in [Architecture](docs/ARCHITECTURE.md).
+Milestone 3 should begin with reliable microphone streaming and incremental transcription while retaining the identity and profile boundaries established here. The remaining roadmap is described in [Architecture](docs/ARCHITECTURE.md).
 
 For deployment-specific caveats, see [Google Cloud deployment](infra/gcp/README.md).

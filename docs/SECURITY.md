@@ -13,6 +13,8 @@ This is a hackathon baseline, not a claim of production-grade security or legal 
 - Structured logs exclude authorization headers, bodies, raw audio, transcript text, contact/profile data, notes, prompts, and credentials.
 - Raw audio is read into memory, bounded, cleared in `finally`, and not intentionally written by the backend.
 - Contact notes are opt-in and deletable. Active fragments are cleared when the session ends.
+- Firebase mode verifies client ID tokens with the Admin SDK and binds profiles and new sessions to the verified UID rather than a caller-supplied owner value.
+- Profile fields and list sizes are bounded, isolated by a hashed user key, and deletable through the authenticated API.
 
 ## Consent and product language
 
@@ -20,7 +22,7 @@ The product must show an unmistakable recording state and provide pause/stop con
 
 ## Secrets
 
-Never place API keys in `EXPO_PUBLIC_*`, source, build arguments, logs, issue text, or test fixtures. Use Secret Manager/runtime injection in cloud deployments and least-privilege service accounts. Rotate any credential that is accidentally exposed. The repository does not auto-load `.env`; this avoids implying that copying secrets into the tree is required.
+Never place service-account credentials, Gemini keys, bearer tokens, or other server secrets in `EXPO_PUBLIC_*`, source, build arguments, logs, issue text, or test fixtures. Firebase web configuration is intentionally embedded client configuration; restrict its API key and rely on verified ID tokens and backend authorization rather than treating it as a secret. Use Secret Manager/runtime injection and least-privilege service accounts for server credentials. Rotate any secret that is accidentally exposed.
 
 ## Data retention
 
@@ -28,17 +30,18 @@ Firestore session writes include a one-day TTL field, while application access e
 
 ## Known gaps
 
-- No Firebase/user authentication yet; public session creation and client-generated owner capabilities are unsuitable for public production.
+- Demo mode still uses a client-generated owner capability and must not be exposed as production authentication.
 - No API gateway, IP/device abuse limit, bot protection, or quota budget.
-- Bearer tokens live in React state; native secure persistence and recovery are not implemented.
+- Session capability tokens live in React state; Firebase sign-in persistence uses browser storage or native AsyncStorage, which is not equivalent to hardware-backed secret storage.
 - Firestore and Cloud Storage security rules/IAM have not been validated in a deployed project.
 - No encryption-key management beyond provider defaults, security scanning, dependency-update automation, audit trail, or incident response runbook.
 - No complete deletion endpoint for every session record/object/provider copy.
+- Profile deletion does not delete the Firebase Authentication account; complete account deletion remains unimplemented.
 - No formal consent record or jurisdiction-specific privacy review.
 - Live provider payload/retention behavior and Android network security need verification.
 - Rate limits and session TTLs are hardcoded product defaults rather than centrally governed policy.
-- The 2026-10-25 `npm audit` reports six high and one moderate transitive advisory in the Expo toolchain. The offered major-version downgrade is incompatible with the current Expo 54 stack, so remediation must be evaluated through supported Expo dependency updates rather than forced automatically.
+- The 2026-10-25 `npm audit` reports ten high and one moderate dependency advisory across the Expo toolchain and Firebase’s bundled but unused Firestore path. Offered major-version downgrades conflict with the current Expo/Firebase stack, so remediation must use supported upstream updates rather than a forced audit fix.
 
-## Milestone 2 priorities
+## Milestone 3 security priorities
 
-Verify Firebase ID tokens server-side, bind sessions/profile records to authenticated user IDs, authorize every profile/note mutation, define account deletion, and use platform-secure storage for durable credentials. Keep session capability checks as defense in depth and add tests for cross-user access before exposing the API.
+Validate Firebase token verification and sign-in persistence on a real Android build, define full account/session deletion, and evaluate platform-secure storage for session capabilities. M3 audio work must keep explicit recording state, permission denial, stop controls, and raw-audio exclusion from telemetry.

@@ -18,8 +18,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from .core.auth import resolve_identity
 from .core.config import settings
 from .core.logging import configure_logging, install_request_logging
+from .schemas.profiles import Profile, ProfileUpdate
 from .services.inference import demo_cues, generate_text
 from .services.summaries import summarize as summarize_text
 
@@ -29,7 +31,7 @@ TABLE = settings.firestore_collection
 GEMINI_KEY = settings.gemini_api_key
 log = configure_logging(settings)
 app = FastAPI(title='Co-Wingman', version='0.1.0')
-app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=['GET','POST','DELETE'], allow_headers=['Authorization','Content-Type','X-Request-ID'], expose_headers=['X-Request-ID'])
+app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=['GET','POST','PUT','DELETE'], allow_headers=['Authorization','Content-Type','X-Request-ID','X-Demo-Owner'], expose_headers=['X-Request-ID'])
 install_request_logging(app, log)
 
 @contextmanager
@@ -92,7 +94,7 @@ class Start(BaseModel):
     context: str = Field(default='', max_length=600)
     contact: str = Field(default='', max_length=300)
     remember: bool = False
-    owner: str = Field(min_length=24, max_length=128)
+    owner: str = Field(default='', max_length=128)
 
 class Fragment(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
@@ -107,6 +109,9 @@ class CueResult(BaseModel):
 
 def contact_key(owner, contact):
     return 'contact:'+hashlib.sha256((owner+':'+contact.strip().lower()).encode()).hexdigest()
+
+def profile_key(user_id):
+    return 'profile:'+hashlib.sha256(user_id.encode()).hexdigest()
 
 def authorize(sid, request):
     state = read('session:'+sid)
@@ -156,12 +161,35 @@ async def ready():
         log.warning('readiness_dependency_failure')
     return Response(json.dumps({'ready':all(checks.values()),'checks':checks,'mode':MODE}),status_code=200 if all(checks.values()) else 503,media_type='application/json')
 
+@app.get('/profile/me', response_model=Profile)
+def get_profile(request: Request):
+    identity = resolve_identity(settings, request)
+    record = read(profile_key(identity.user_id)) or {}
+    if identity.email and not record.get('email'):
+        record['email'] = identity.email
+    return Profile.model_validate(record)
+
+@app.put('/profile/me', response_model=Profile)
+def put_profile(body: ProfileUpdate, request: Request):
+    identity = resolve_identity(settings, request)
+    record = body.model_dump()
+    record.update(email=identity.email, updated_at=datetime.now(timezone.utc).isoformat())
+    write(profile_key(identity.user_id), record)
+    return Profile.model_validate(record)
+
+@app.delete('/profile/me')
+def delete_profile(request: Request):
+    identity = resolve_identity(settings, request)
+    delete(profile_key(identity.user_id))
+    return {'deleted':True}
+
 @app.post('/session/start')
-def start(body: Start):
+def start(body: Start, request: Request):
+    identity = resolve_identity(settings, request, body.owner)
     sid, token = str(uuid.uuid4()), secrets.token_urlsafe(32)
-    ck = contact_key(body.owner, body.contact or body.name)
+    ck = contact_key(identity.user_id, body.contact or body.name)
     memory = read(ck) if body.remember else None
-    state = {'id':sid,'name':body.name,'context':body.context,'contact_key':ck,'remember':body.remember,'memory':(memory or {}).get('summary',''),'summary':'','fragments':[],'cues':[],'token_hash':hashlib.sha256(token.encode()).hexdigest(),'expires':time.time()+7200,'signal':'low'}
+    state = {'id':sid,'owner_id':identity.user_id,'name':body.name,'context':body.context,'contact_key':ck,'remember':body.remember,'memory':(memory or {}).get('summary',''),'summary':'','fragments':[],'cues':[],'token_hash':hashlib.sha256(token.encode()).hexdigest(),'expires':time.time()+7200,'signal':'low'}
     write('session:'+sid,state)
     return {'id':sid,'token':token,'memory':state['memory'],'mode':MODE}
 

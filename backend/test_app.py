@@ -1,8 +1,12 @@
 import os
 import tempfile
+from dataclasses import replace
 os.environ['DATABASE_PATH'] = tempfile.mktemp(suffix='.db')
 os.environ['APP_MODE'] = 'demo'
 from fastapi.testclient import TestClient
+from app.core.auth import Identity
+import app.core.auth as auth_core
+import app.main as main_module
 from app.main import app, log, read
 
 client = TestClient(app)
@@ -74,3 +78,45 @@ def test_input_validation_limits():
         'owner':'test-owner-with-strong-capability-123456',
     })
     assert response.status_code == 422
+
+def test_demo_profile_crud_and_isolation():
+    alice = {'X-Demo-Owner':'demo-owner-alice-1234567890'}
+    bob = {'X-Demo-Owner':'demo-owner-bob-123456789012'}
+    profile = {
+        'display_name':'Alice Example',
+        'headline':'Product designer',
+        'organization':'Gator University',
+        'skills':['Research','Prototyping'],
+        'interests':['Accessible technology'],
+        'networking_goals':'Meet thoughtful builders.',
+        'accomplishments':'Led a student design project.',
+        'portfolio_url':'https://example.com',
+        'resume_summary':'Design and research experience.',
+    }
+    saved = client.put('/profile/me', headers=alice, json=profile)
+    assert saved.status_code == 200
+    assert saved.json()['display_name'] == 'Alice Example'
+    assert saved.json()['updated_at']
+    assert client.get('/profile/me', headers=alice).json()['skills'] == ['Research','Prototyping']
+    assert client.get('/profile/me', headers=bob).json()['display_name'] == ''
+    assert client.get('/profile/me').status_code == 401
+    assert client.delete('/profile/me', headers=alice).json() == {'deleted':True}
+    assert client.get('/profile/me', headers=alice).json()['display_name'] == ''
+
+def test_firebase_mode_uses_verified_uid(monkeypatch):
+    firebase_settings = replace(main_module.settings, auth_mode='firebase', firebase_project_id='test-project')
+    monkeypatch.setattr(main_module, 'settings', firebase_settings)
+    monkeypatch.setattr(
+        auth_core,
+        'verify_firebase_token',
+        lambda settings, token: Identity('firebase-user-'+token, token+'@example.com', 'firebase'),
+    )
+    headers = {'Authorization':'Bearer alice'}
+    assert client.get('/profile/me').status_code == 401
+    saved = client.put('/profile/me', headers=headers, json={'display_name':'Firebase Alice'})
+    assert saved.status_code == 200
+    assert saved.json()['email'] == 'alice@example.com'
+    started = client.post('/session/start', headers=headers, json={'name':'Taylor'})
+    assert started.status_code == 200
+    state = read('session:'+started.json()['id'])
+    assert state['owner_id'] == 'firebase-user-alice'

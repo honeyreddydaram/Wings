@@ -2,7 +2,7 @@
 
 Base URL in local development: `http://localhost:8000`. JSON is used except for audio upload and WAV playback. FastAPI also exposes generated OpenAPI documentation at `/docs` while the application is running.
 
-All `/session/{sid}/...` operations require `Authorization: Bearer <token>` except session creation. The token is returned once by session creation. Common session errors are `401` invalid token, `410` expired/ended session, `429` per-session limit exceeded, and `409` concurrent session update. Validation failures return FastAPI’s standard `422` detail envelope.
+All `/session/{sid}/...` operations require the session capability in `Authorization: Bearer <token>`. In Firebase auth mode, `/session/start` and `/profile/me` instead require a Firebase ID token in that header. Demo profile calls use `X-Demo-Owner`; that header is explicitly not production authentication. Common session errors are `401` invalid token, `410` expired/ended session, `429` per-session limit exceeded, and `409` concurrent session update. Validation failures return FastAPI’s standard `422` detail envelope.
 
 ## Health
 
@@ -26,11 +26,31 @@ Success (`200`):
 
 Live dependency failure returns `503` with `ready: false` and Boolean `storage`/`gemini` checks. This does not validate Speech-to-Text or inference quota.
 
+## Profile
+
+### `GET /profile/me`
+
+Returns the current user’s persistent professional profile. Authentication is Firebase bearer token or the demo identity header described above. An absent profile returns `200` with empty fields rather than `404`.
+
+### `PUT /profile/me`
+
+Replaces the current user’s profile. Authentication is required.
+
+```json
+{"display_name":"Avery","headline":"CS student","organization":"University","skills":["Python"],"interests":["AI"],"networking_goals":"Meet ML engineers","accomplishments":"Built a campus app","portfolio_url":"https://example.com","resume_summary":"Backend and ML experience"}
+```
+
+Strings and lists are bounded; portfolio URLs must use HTTP or HTTPS. The response adds trusted `email` when available and `updated_at`. Errors: `401` missing/invalid identity and `422` invalid fields.
+
+### `DELETE /profile/me`
+
+Deletes the current user’s stored profile and returns `{"deleted":true}`. This does not delete the Firebase account, conversation sessions, or provider-held data.
+
 ## Sessions
 
 ### `POST /session/start`
 
-Creates a session. No session authentication (a known pre-M2 gap).
+Creates a session. Firebase mode requires and verifies a Firebase ID token; the trusted UID becomes the session owner. Demo mode retains the local owner capability for credential-free development.
 
 Request:
 
@@ -38,7 +58,7 @@ Request:
 {"name":"Alex","context":"Met at Gator Hacks","contact":"optional label","remember":false,"owner":"minimum-24-character-device-capability"}
 ```
 
-`name` ≤100 chars, `context` ≤600, `contact` ≤300, and `owner` is 24–128 chars. Response `200`:
+`name` ≤100 chars, `context` ≤600, and `contact` ≤300. `owner` is required only in demo mode and must be 24–128 chars there; it is ignored as an identity claim in Firebase mode. Response `200`:
 
 ```json
 {"id":"uuid","token":"opaque bearer token","memory":"","mode":"demo"}
@@ -110,4 +130,4 @@ Optional Cloud Storage failure does not fail the response. Provider summary fail
 
 ## Future proposals (not implemented)
 
-M2 may add authenticated profile endpoints; M3 may add streaming transport; M6 may add card/QR/vCard endpoints. These are intentionally excluded from the current contract until implemented.
+M3 may add streaming transport; M6 may add card/QR/vCard endpoints. These are intentionally excluded from the current contract until implemented.

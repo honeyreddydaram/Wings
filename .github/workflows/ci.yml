@@ -39,3 +39,5 @@ jobs:
       - run: npm ci --prefix mobile
       - run: npm run typecheck --prefix mobile
       - run: npm run build --prefix mobile
+      - run: npx expo export --platform android --output-dir /tmp/wings-android-export
+        working-directory: mobile

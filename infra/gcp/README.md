@@ -6,6 +6,8 @@ This integration uses synchronous recognition of completed recordings, not strea
 
 The active deployment targets Cloud Run for the API and web app, Firestore for session state and personal notes, and Secret Manager for provider keys. Gemini generates cues and voice; Google Speech-to-Text V2 Chirp 3 transcribes audio. SQLite demo mode still works without cloud credentials.
 
+Firebase authentication is optional during deployment. Enable Email/Password in the Firebase console, export `AUTH_MODE=firebase`, and provide every `EXPO_PUBLIC_FIREBASE_*` value listed in `mobile/.env.example` before running the script. The backend uses Application Default Credentials to verify client ID tokens; no service-account key belongs in the mobile build. If `AUTH_MODE` is omitted, deployment preserves demo identity behavior.
+
 1. Select or create a Google Cloud project and link billing. Choose a region (default `us-central1`).
 2. In Secret Manager, create a secret named `GEMINI_API_KEY` with its raw API key as the secret value. Do not put keys in chat or source control.
 3. Authenticate the Google Cloud CLI using your deployment identity. It needs permission to enable APIs, deploy Cloud Run/source builds, create Firestore, manage the runtime service account, and grant the documented roles. Source builds also need the Cloud Build service account configured with Cloud Run builder permissions for your project's build policy.
@@ -14,10 +16,12 @@ The active deployment targets Cloud Run for the API and web app, Firestore for s
 ```bash
 export GOOGLE_CLOUD_PROJECT=your-project-id
 export GCP_REGION=us-central1
+# Optional after Firebase client configuration is exported:
+# export AUTH_MODE=firebase
 bash infra/gcp/deploy.sh
 ```
 
-The script creates a runtime service account with Firestore access and access only to the Gemini secret. Firestore session documents have an `expires_at` TTL timestamp; personal notes remain until deleted. Transactions reject stale session updates. Cloud Run services have public HTTPS endpoints; session API operations still require bearer tokens. Add real user authentication and abuse protection before a production launch.
+The script creates a runtime service account with Firestore access and access only to the Gemini secret. Firestore session documents have an `expires_at` TTL timestamp; profiles and personal notes remain until deleted. Transactions reject stale session updates. Cloud Run services have public HTTPS endpoints; use Firebase mode plus gateway abuse protection before a public production launch.
 
 Optional summary storage: create a private Cloud Storage bucket with a 30-day lifecycle policy, grant the runtime service account `roles/storage.objectCreator` on that bucket only, then set `SUMMARY_BUCKET` on the API service. This is off by default.
 

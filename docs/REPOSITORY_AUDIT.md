@@ -6,7 +6,7 @@ Audit date: 2026-10-25. Findings marked **Verified** come from source, tests, or
 
 The repository contains one Expo/React Native application, one FastAPI process, two persistence modes, Google provider adapters, and reference infrastructure. The local path is Expo → REST → FastAPI → SQLite. The configured live path replaces SQLite with Firestore and enables Gemini, Speech-to-Text, and optional Cloud Storage. Cloud Run deployment scripts build the API and exported web client.
 
-Milestone 1 introduced centralized settings and logging under `backend/app/core` plus inference and summary seams under `backend/app/services`. Route orchestration and storage functions remain in `main.py` to avoid destabilizing a working MVP.
+Milestone 1 introduced centralized settings and logging under `backend/app/core` plus inference and summary seams under `backend/app/services`. Milestone 2 added Firebase/demo authentication, persistent profiles, and durable local mobile identity. Route orchestration and storage functions remain in `main.py` to avoid destabilizing a working MVP.
 
 ## Existing capabilities — verified
 
@@ -21,12 +21,14 @@ Milestone 1 introduced centralized settings and logging under `backend/app/core`
 - Gemini cue/TTS, Google Speech-to-Text V2, and optional Cloud Storage code paths.
 - Backend lifecycle/isolation/readiness/rate/privacy tests, frontend type checking and Expo export scripts, and CI.
 - Structured request completion/failure logs with correlation IDs and duration.
+- Firebase ID-token verification, UID-bound session creation, profile CRUD/isolation tests, and email/password client flows.
+- Persistent professional profiles for organization, skills, interests, goals, accomplishments, portfolio URL, and résumé summary.
 
 ## Limitations — verified
 
-- The mobile application is a single large component and has no component/unit test suite.
+- The mobile application remains a large component despite extracting authentication, and has no component/unit test suite.
 - `main.py` still coordinates routes, authorization, persistence, readiness, TTS, and lifecycle state.
-- Session creation is public; the owner value is a client-generated capability rather than an authenticated account.
+- Session creation is authenticated in Firebase mode; demo mode remains public and capability-based by design.
 - Rate limiting is per session and occurs after storage lookup; there is no gateway/IP abuse control for public session creation.
 - Audio uses request/response upload, not continuous streaming; a successful request is authorized twice by current route reuse and counts twice against the session limit.
 - The hesitation signal is a text heuristic plus client-supplied pause count. It is not the planned four-second audio classifier and is not clinical.
@@ -35,7 +37,7 @@ Milestone 1 introduced centralized settings and logging under `backend/app/core`
 - Provider failures are mapped to generic API errors, but retry/backoff and circuit breaking are absent.
 - OpenTelemetry, Sentry, dashboards, alerts, cost telemetry, and end-to-end latency metrics are documented only.
 - The legacy AWS infrastructure files do not match the active Google Cloud architecture.
-- `npm audit` reports seven transitive findings in the Expo toolchain (six high, one moderate), including `node-forge`, `postcss`, and `image-size`; its suggested Expo downgrade is not a safe automatic remediation and needs an Expo-compatible dependency update review.
+- `npm audit` reports eleven dependency findings (ten high, one moderate) across the Expo toolchain and Firebase’s bundled Firestore dependency. The app imports Firebase Auth only, but the advisories remain in the installed tree; suggested major downgrades are not safe automatic remediations.
 
 ## Assumptions / needs validation
 
@@ -48,7 +50,7 @@ Milestone 1 introduced centralized settings and logging under `backend/app/core`
 
 ## Technical debt and coupling
 
-The highest-value split was provider-independent inference and summary logic, now isolated. Storage should be the next extraction once M2 introduces user/profile schemas; doing it now would mostly move code without clarifying requirements. The mobile `App.tsx` should later split API access, recording, session state, and screens, but M1 avoids a high-risk UI rewrite. `speech.py` is a concrete adapter rather than a formal protocol because there is only one current implementation.
+The highest-value splits are provider-independent inference, summaries, and authentication. Profile schemas now clarify the next storage extraction, but persistence remains in `main.py` to avoid a broad migration during authentication work. The mobile `App.tsx` should next split API access, recording, session state, and screens. `speech.py` is a concrete adapter rather than a formal protocol because there is only one current implementation.
 
 ## Hardcoded or startup configuration found
 
@@ -56,7 +58,7 @@ Previously, model names, TTS model, audio size, logging level, and future timing
 
 ## Immediate risks
 
-1. Do not expose live mode publicly before real account authentication and edge abuse controls.
+1. Do not expose demo auth publicly; Firebase mode still needs deployed validation and edge abuse controls.
 2. Do not promise universal participant consent, audio format support, or deployed cloud readiness.
 3. Avoid logging request bodies or expanding exception logs with provider payloads; those can contain private context.
 4. Treat the mobile owner capability as recoverable local state, not identity.
@@ -64,7 +66,7 @@ Previously, model names, TTS model, audio size, logging level, and future timing
 
 ## Recommended future improvements
 
-- M2: Firebase token verification, user/profile schemas, durable owner mapping, and authenticated session creation.
+- M2 follow-up: validate Firebase sign-in on Android and implement complete account deletion/password recovery.
 - M3: isolate recording/API hooks in the client, remove double authorization on audio, and add format/device fixtures.
 - M4: implement local derived-feature interfaces, cooldowns, explicit opt-in, and false-positive evaluation.
 - M5: add a real Gemma provider adapter and contract tests instead of reusing a Gemini model-name assumption.

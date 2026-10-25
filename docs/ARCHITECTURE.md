@@ -9,14 +9,14 @@
 ```mermaid
 flowchart TB
     A[Android application<br/>Implemented: Expo UI and completed-chunk recording<br/>Simulated: demo transcript input] -->|HTTPS REST + bearer capability| B[FastAPI backend<br/>Implemented]
-    B --> C[Authentication<br/>Implemented: per-session bearer capability<br/>Planned M2: Firebase Authentication]
+    B --> C[Authentication<br/>Implemented: Firebase ID-token verification<br/>Implemented: per-session bearer capability]
     B --> D[Session management<br/>Implemented: lifecycle, expiry, rate count]
     B --> E[Audio processing interface<br/>Implemented: bounded upload<br/>Planned M3/M4: streaming + local windows]
     B --> F[Transcription interface<br/>Implemented but unverified live: Google STT adapter]
     B --> G[Assistance detection<br/>Simulated: text hesitation heuristic<br/>Planned M4: conservative audio signal]
     B --> H[AI inference interface<br/>Implemented: demo/Gemini seam<br/>Planned M5: Gemma adapter]
     B --> I[Summarization<br/>Implemented: size-triggered bounded summaries<br/>Planned: timed checkpoints]
-    B --> J[Contact/profile storage<br/>Implemented: opt-in topic notes<br/>Planned M2/M6: profiles and cards]
+    B --> J[Contact/profile storage<br/>Implemented: authenticated profiles + opt-in notes<br/>Planned M6: cards and exchange]
     B --> K[Observability<br/>Implemented: JSON request logs + request IDs<br/>Planned M7: metrics/traces/alerts]
     D & F & H & I & J & K --> L[Google Cloud services<br/>Adapters/reference deployment only]
     L --> L1[Cloud Run]
@@ -28,7 +28,9 @@ flowchart TB
 
 ## Current runtime
 
-The Expo client creates a session and keeps the returned bearer capability in component state. Each session operation sends that token. The FastAPI application hashes tokens before persistence, enforces a two-hour session expiry and per-session request count, and stores state through SQLite in demo mode or Firestore when configured. Active context consists of a bounded summary plus recent fragments. Cue generation uses deterministic demo rules by default or the current Gemini adapter in live mode. The `INFERENCE_PROVIDER` boundary reserves a distinct Gemma adapter; selecting Gemma currently fails closed because changing only a model name would not be a valid integration.
+With Firebase configured, the Expo client persists its Firebase sign-in, sends an ID token to profile routes and session creation, and receives a separate session capability for conversation operations. The backend verifies the ID token and uses its UID for profile and contact-note ownership. Demo mode replaces this with a persistent local device capability and is explicitly non-production.
+
+The FastAPI application hashes session tokens before persistence, enforces a two-hour session expiry and per-session request count, and stores state through SQLite in demo mode or Firestore when configured. Active context consists of a bounded summary plus recent fragments. Cue generation uses deterministic demo rules by default or the current Gemini adapter in live mode. The `INFERENCE_PROVIDER` boundary reserves a distinct Gemma adapter; selecting Gemma currently fails closed because changing only a model name would not be a valid integration.
 
 The backend remains one deployable service. This is intentional for a hackathon: internal module boundaries allow replacement without adding network hops, distributed transactions, or additional operations work.
 
@@ -37,13 +39,13 @@ The backend remains one deployable service. This is intentional for a hackathon:
 | Boundary | Current implementation | Later evolution |
 |---|---|---|
 | Client/API | REST from one Expo screen | More focused client modules and streaming transport where justified |
-| Identity | Random device owner capability plus session token | Firebase Authentication and durable user identity in M2 |
+| Identity | Firebase Authentication when configured; persistent demo device capability locally; separate session token | OAuth providers, account deletion, and stronger device secret storage |
 | Session storage | SQLite or Firestore record adapter in `main.py` | Extract a repository when profile/session schemas evolve |
 | Transcription | Completed audio upload to Google Speech-to-Text V2 | Incremental/streaming flow in M3 |
 | Assistance signal | Transcript hesitation and caller-provided pause count | Local, non-clinical audio feature pipeline in M4 |
 | Inference | Deterministic demo cues or Gemini JSON response | Provider-specific Gemma implementation in M5 |
 | Summary | Keyword summary in demo; provider summary in live mode | Timed checkpoints and final summary orchestration |
-| Contact data | Hashed lookup key and opt-in topic summary | Profiles, cards, QR and compatible NFC in M6 |
+| Contact/profile data | UID-isolated professional profile, hashed contact lookup, opt-in topic summary | Cards, QR and compatible NFC in M6 |
 | Telemetry | JSON request completion/failure events | OpenTelemetry metrics/traces and cloud dashboards in M7 |
 
 ## Future real-time pipeline
@@ -67,8 +69,8 @@ The four-second path should remain local where practical and emit only derived v
 
 ## Data lifecycle
 
-Raw uploaded audio is held in memory and cleared after the request. Recent transcript fragments remain in active session storage until they are summarized or the session ends. Session records receive a Firestore TTL field in live mode; SQLite demo files persist until the local database is removed. Contact notes persist only after explicit opt-in and have an API deletion path. Provider-side retention is controlled by provider policy and is not guaranteed by this code.
+Raw uploaded audio is held in memory and cleared after the request. Recent transcript fragments remain in active session storage until they are summarized or the session ends. Session records receive a Firestore TTL field in live mode; SQLite demo files persist until the local database is removed. Profiles and opt-in contact notes persist until their respective deletion actions. Deleting a profile does not delete the Firebase account or conversation records. Provider-side retention is controlled by provider policy and is not guaranteed by this code.
 
 ## Milestone sequence
 
-M2 adds account authentication and profiles; M3 establishes reliable audio/transcription; M4 implements conservative assistance signals; M5 adds Gemma; M6 adds digital identity/contact exchange; M7 completes telemetry, privacy controls, and deployment; M8 integrates and validates the demo end to end.
+M1 established the foundation; M2 added Firebase authentication and profiles; M3 establishes reliable audio/transcription; M4 implements conservative assistance signals; M5 adds Gemma; M6 adds digital identity/contact exchange; M7 completes telemetry, privacy controls, and deployment; M8 integrates and validates the demo end to end.

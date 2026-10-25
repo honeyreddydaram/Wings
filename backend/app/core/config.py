@@ -24,6 +24,9 @@ class Settings:
     cors_origins: tuple[str, ...]
     google_cloud_project: str | None
     firestore_collection: str | None
+    auth_mode: str
+    firebase_project_id: str | None
+    firebase_check_revoked: bool
     inference_provider: str
     gemini_api_key: str | None
     inference_model: str
@@ -49,6 +52,9 @@ def load_settings() -> Settings:
         cors_origins=_csv("CORS_ORIGINS", "http://localhost:8081,http://localhost:19006"),
         google_cloud_project=os.getenv("GOOGLE_CLOUD_PROJECT"),
         firestore_collection=os.getenv("FIRESTORE_COLLECTION"),
+        auth_mode=os.getenv("AUTH_MODE", "demo").strip().lower(),
+        firebase_project_id=os.getenv("FIREBASE_PROJECT_ID", os.getenv("GOOGLE_CLOUD_PROJECT")),
+        firebase_check_revoked=_bool("FIREBASE_CHECK_REVOKED"),
         inference_provider=provider,
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         inference_model=os.getenv("INFERENCE_MODEL", os.getenv("GEMINI_MODEL", "gemini-2.5-flash")),
@@ -68,6 +74,10 @@ def load_settings() -> Settings:
         raise RuntimeError("APP_MODE must be 'demo' or 'live'")
     if settings.app_mode == "live" and not settings.firestore_collection:
         raise RuntimeError("Live mode requires FIRESTORE_COLLECTION")
+    if settings.auth_mode not in {"demo", "firebase"}:
+        raise RuntimeError("AUTH_MODE must be 'demo' or 'firebase'")
+    if settings.auth_mode == "firebase" and not settings.firebase_project_id:
+        raise RuntimeError("Firebase auth mode requires FIREBASE_PROJECT_ID or GOOGLE_CLOUD_PROJECT")
     if settings.inference_provider not in {"demo", "gemini", "gemma"}:
         raise RuntimeError("INFERENCE_PROVIDER must be demo, gemini, or gemma")
     return settings
