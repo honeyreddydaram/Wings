@@ -192,7 +192,7 @@ Reference: [Milestone 3 details](docs/MILESTONE_3.md).
 
 ## Milestone 4 — Conversational Difficulty Detection
 
-**Status: Pending**
+**Status: Complete locally; physical-device calibration and venue evaluation pending**
 
 ### Objective
 
@@ -200,37 +200,39 @@ Estimate when conversational assistance might be useful through conservative, co
 
 ### Local analysis pipeline
 
-- [ ] Define a local four-second ring-buffer interface independent of upload chunk boundaries.
-- [ ] Extract privacy-preserving audio features such as voice activity, pause duration, energy variation, pitch movement, and speaking-rate estimates.
-- [ ] Detect fillers, interruptions, and repeated speech from transcript events where appropriate.
-- [ ] Normalize features across devices and noisy environments.
-- [ ] Produce a bounded assistance score with `low`, `medium`, and `high` product-facing states.
-- [ ] Avoid storing raw feature windows unless explicitly needed for opted-in testing.
-- [ ] Keep precise audio features out of telemetry when they could expose or reconstruct content.
+- [x] Define a local four-second scalar ring-buffer interface independent of upload chunk boundaries.
+- [x] Extract privacy-preserving voice activity, pause duration, energy variation, and speaking-rate estimates from microphone levels and transcript timing.
+- [x] Detect filler and repeated-speech counts from transcript events without retaining transcript words in the detector.
+- [x] Normalize microphone levels against a recent adaptive noise floor.
+- [x] Produce a bounded assistance score with `low`, `medium`, and `high` product-facing states.
+- [x] Store only bounded derived scalar samples and counts; never store raw audio in the detector.
+- [x] Keep detector features out of operational telemetry.
 
 ### Intervention policy
 
-- [ ] Require a separate opt-in for automatic assistance.
-- [ ] Retain the manual **Get me unstuck** action regardless of automatic-detection settings.
-- [ ] Define minimum confidence, consecutive-window, cooldown, session-cap, and recovery thresholds.
-- [ ] Suppress interventions while the assistant is speaking, during recorder transitions, and immediately after user interaction.
-- [ ] Explain why an automatic suggestion appeared without claiming emotional or medical knowledge.
-- [ ] Allow users to disable automatic assistance immediately.
+- [x] Require a separate per-session opt-in for automatic assistance.
+- [x] Retain the manual **Get me unstuck** action regardless of automatic-detection settings.
+- [x] Define minimum confidence, two consecutive high windows, a 45-second cooldown, three-intervention session cap, and low-state recovery.
+- [x] Suppress interventions while the assistant is speaking, during recorder transitions, and for five seconds after user interaction.
+- [x] Explain why an automatic suggestion appeared without claiming emotional or medical knowledge.
+- [x] Allow users to disable automatic assistance immediately.
 
 ### Evaluation
 
-- [ ] Create synthetic and consented test fixtures for quiet speech, long pauses, fillers, interruptions, silence, crowd noise, and music.
-- [ ] Add deterministic unit tests for feature extraction and policy state transitions.
-- [ ] Measure false positives, missed assistance opportunities, trigger latency, and cooldown behavior.
+- [x] Create synthetic fixtures for speech, long pauses, fillers, repetition, silence, crowd noise, and music-like levels.
+- [x] Add deterministic unit tests for feature extraction and policy state transitions.
+- [x] Measure local synthetic false triggers, gating, trigger latency, and cooldown behavior; the current test set produces no false triggers in its three negative fixtures.
 - [ ] Test across several Android devices, microphones, voices, and venue-noise conditions.
-- [ ] Document model/heuristic limitations and prohibit clinical interpretation.
+- [x] Document heuristic limitations and prohibit clinical interpretation.
 
 ### Exit criteria
 
-- [ ] No automatic intervention occurs without explicit opt-in.
-- [ ] Manual help remains immediate and independent of the detector.
-- [ ] False-positive behavior is measured and acceptable for the demonstration.
-- [ ] The UI and documentation consistently use non-clinical language.
+- [x] No automatic intervention occurs without explicit opt-in in local policy tests.
+- [x] Manual help remains immediate and independent of the detector.
+- [x] Synthetic false-positive behavior is measured and acceptable for local demonstration; venue/device acceptance remains pending.
+- [x] The UI and documentation consistently use non-clinical language.
+
+Reference: [Milestone 4 details](docs/MILESTONE_4.md).
 
 ---
 

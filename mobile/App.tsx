@@ -17,6 +17,10 @@ import { StatusBar } from "expo-status-bar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRollingAudioPipeline } from "./src/audioPipeline";
 import {
+  DifficultyDetector,
+  DifficultySnapshot,
+} from "./src/difficultyDetector";
+import {
   firebaseConfigured,
   getIdentityToken,
   observeAuth,
@@ -103,6 +107,16 @@ export default function App() {
     saved: boolean;
   } | null>(null);
   const [recordingConsent, setRecordingConsent] = useState(false);
+  const [autoAssist, setAutoAssist] = useState(false);
+  const [assistantSpeaking, setAssistantSpeaking] = useState(false);
+  const [difficulty, setDifficulty] = useState<DifficultySnapshot>({
+    level: "low",
+    confidence: 0,
+    explanation:
+      "No strong assistance signal right now. This is a rough conversation signal, not a diagnosis.",
+    triggered: false,
+  });
+  const [automaticExplanation, setAutomaticExplanation] = useState("");
   const [seconds, setSeconds] = useState(0);
   const [owner, setOwner] = useState("");
   const [authUser, setAuthUser] = useState<User | null>(null);
@@ -110,12 +124,38 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
+  const difficultyDetector = useRef(new DifficultyDetector());
+  const autoAssistRef = useRef(false);
+  const assistantSpeakingRef = useRef(false);
+  const busyRef = useRef(false);
+  const automaticRequestPending = useRef(false);
   const audio = useRollingAudioPipeline({
     chunkSeconds: AUDIO_CHUNK_SECONDS,
     onChunk: uploadAudioChunk,
     onError: (message) => setError(message),
   });
   const listening = audio.phase === "recording";
+  autoAssistRef.current = autoAssist;
+  assistantSpeakingRef.current = assistantSpeaking;
+  busyRef.current = Boolean(busy);
+  useEffect(() => {
+    if (!listening || typeof audio.metering !== "number") return;
+    const result = difficultyDetector.current.observeMeter(audio.metering, {
+      optedIn: autoAssistRef.current,
+      assistantSpeaking: assistantSpeakingRef.current,
+      recorderTransitioning: busyRef.current || audio.phase !== "recording",
+      nowMs: Date.now(),
+    });
+    if (!result) return;
+    setDifficulty(result);
+    if (result.triggered && !automaticRequestPending.current) {
+      automaticRequestPending.current = true;
+      setAutomaticExplanation(result.explanation);
+      void getCues(true).finally(() => {
+        automaticRequestPending.current = false;
+      });
+    }
+  }, [audio.metering, listening]);
   useEffect(() => {
     void (async () => {
       let key = await AsyncStorage.getItem("cw-owner");
@@ -255,22 +295,43 @@ export default function App() {
       setCues([]);
       setTranscript("");
       setRecordingConsent(false);
+      setAutoAssist(false);
+      setAutomaticExplanation("");
+      setDifficulty({
+        level: "low",
+        confidence: 0,
+        explanation:
+          "No strong assistance signal right now. This is a rough conversation signal, not a diagnosis.",
+        triggered: false,
+      });
+      difficultyDetector.current.reset(Date.now());
       audio.reset();
     });
   }
   async function add(text: string) {
     if (!session || !text.trim()) return;
     const data = await api(`/session/${session.id}/transcript`, { text });
+    difficultyDetector.current.observeTranscript(text, Date.now());
     setTranscript((t) => (t + " " + text).trim().slice(-2000));
     setSignal(data.signal);
     setDraft("");
   }
   async function play(cue: Cue) {
     Speech.stop();
-    Speech.speak(cue.text, { rate: 0.9 });
+    Speech.speak(cue.text, {
+      rate: 0.9,
+      onStart: () => setAssistantSpeaking(true),
+      onDone: () => setAssistantSpeaking(false),
+      onStopped: () => setAssistantSpeaking(false),
+      onError: () => setAssistantSpeaking(false),
+    });
   }
-  async function getCues() {
+  async function getCues(automatic = false) {
     if (!session) return;
+    if (!automatic) {
+      difficultyDetector.current.noteInteraction(Date.now());
+      setAutomaticExplanation("");
+    }
     await run("Finding a little inspiration", async () => {
       const data = await api(`/session/${session.id}/cue`);
       setCues(data.cues);
@@ -319,11 +380,13 @@ export default function App() {
       );
     }
     const result = await response.json();
+    difficultyDetector.current.observeTranscript(result.text, capturedAtMs);
     setTranscript((t) => (t + " " + result.text).slice(-2000));
     setSignal(result.signal);
   }
   async function mic() {
     if (!session) return;
+    difficultyDetector.current.noteInteraction(Date.now());
     if (session.mode === "demo") {
       await run("Adding sample", () => add(SAMPLE));
       return;
@@ -349,6 +412,8 @@ export default function App() {
       const data = await api(`/session/${session.id}/end`);
       setEnded(data);
       Speech.stop();
+      setAssistantSpeaking(false);
+      setAutoAssist(false);
       audio.reset();
     });
   }
@@ -1111,26 +1176,55 @@ export default function App() {
                         </Text>
                       </View>
                       {session.mode !== "demo" && (
-                        <View style={s.consentRow}>
-                          <Icon name="people-outline" size={18} />
-                          <View style={{ flex: 1 }}>
-                            <Text style={s.toggleTitle}>
-                              Everyone knows the microphone is in use
-                            </Text>
-                            <Text style={s.tiny}>
-                              Required before recording. The indicator stays
-                              visible while capture is active.
-                            </Text>
+                        <>
+                          <View style={s.consentRow}>
+                            <Icon name="people-outline" size={18} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.toggleTitle}>
+                                Everyone knows the microphone is in use
+                              </Text>
+                              <Text style={s.tiny}>
+                                Required before recording. The indicator stays
+                                visible while capture is active.
+                              </Text>
+                            </View>
+                            <Switch
+                              accessibilityLabel="Recording consent confirmed"
+                              value={recordingConsent}
+                              onValueChange={(value) => {
+                                setRecordingConsent(value);
+                                if (!value) setAutoAssist(false);
+                              }}
+                              disabled={listening}
+                              trackColor={{ false: "#DDE3DA", true: C.green }}
+                              thumbColor="#fff"
+                            />
                           </View>
-                          <Switch
-                            accessibilityLabel="Recording consent confirmed"
-                            value={recordingConsent}
-                            onValueChange={setRecordingConsent}
-                            disabled={listening}
-                            trackColor={{ false: "#DDE3DA", true: C.green }}
-                            thumbColor="#fff"
-                          />
-                        </View>
+                          <View style={s.consentRow}>
+                            <Icon name="sparkles-outline" size={18} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.toggleTitle}>
+                                Automatic gentle suggestions
+                              </Text>
+                              <Text style={s.tiny}>
+                                Optional. Uses local pause, microphone-level, and
+                                transcript patterns. It does not measure anxiety.
+                              </Text>
+                            </View>
+                            <Switch
+                              accessibilityLabel="Automatic gentle suggestions"
+                              value={autoAssist}
+                              onValueChange={(value) => {
+                                difficultyDetector.current.noteInteraction(Date.now());
+                                setAutoAssist(value);
+                                setAutomaticExplanation("");
+                              }}
+                              disabled={!recordingConsent && !autoAssist}
+                              trackColor={{ false: "#DDE3DA", true: C.green }}
+                              thumbColor="#fff"
+                            />
+                          </View>
+                        </>
                       )}
                       <View style={s.transcriptBox}>
                         <Text style={s.label}>THE RECENT CONVERSATION</Text>
@@ -1163,7 +1257,7 @@ export default function App() {
                         <Button
                           text="Get me unstuck"
                           icon="sparkles-outline"
-                          onPress={getCues}
+                          onPress={() => void getCues(false)}
                         />
                         <Pressable disabled={!!busy} onPress={end}>
                           <Text style={s.endText}>End conversation</Text>
@@ -1183,6 +1277,18 @@ export default function App() {
                   <Text style={[s.small, { marginTop: 10 }]}>
                     A nudge, not a script. Make it your own.
                   </Text>
+                  {!!automaticExplanation && (
+                    <View accessibilityRole="alert" style={s.autoExplanation}>
+                      <Icon name="information-circle-outline" size={18} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.toggleTitle}>Why this appeared</Text>
+                        <Text style={s.tiny}>{automaticExplanation}</Text>
+                      </View>
+                      <Pressable onPress={() => setAutomaticExplanation("")}>
+                        <Icon name="close" size={17} color={C.muted} />
+                      </Pressable>
+                    </View>
+                  )}
                   <View style={s.cueList}>
                     {cues.length ? (
                       cues.map((cue, i) => (
@@ -1281,7 +1387,10 @@ export default function App() {
                       value={voice}
                       onValueChange={(v) => {
                         setVoice(v);
-                        if (!v) Speech.stop();
+                        if (!v) {
+                          Speech.stop();
+                          setAssistantSpeaking(false);
+                        }
                       }}
                       trackColor={{ false: "#DDE3DA", true: C.green }}
                       thumbColor="#fff"
@@ -1292,18 +1401,22 @@ export default function App() {
                   <Icon name="sunny-outline" color={C.orange} size={25} />
                   <View style={{ flex: 1 }}>
                     <Text style={s.gentleTitle}>
-                      {signal === "high"
+                      {difficulty.level === "high"
                         ? "There’s no rush."
                         : "You don’t have to be interesting."}
                     </Text>
                     <Text style={s.small}>
-                      {signal === "high"
+                      {difficulty.level === "high"
                         ? "Take a breath. A short, simple question is enough."
                         : "Just be interested. A good question can open a whole new door."}
                     </Text>
                     {session && (
                       <Text style={[s.footnote, { marginTop: 10 }]}>
-                        Speech-pattern signal: {signal} · Not a diagnosis
+                        Local assistance signal: {difficulty.level}
+                        {autoAssist
+                          ? ` · confidence ${Math.round(difficulty.confidence * 100)}%`
+                          : " · automatic help off"}
+                        {" · Not a diagnosis"}
                       </Text>
                     )}
                   </View>
@@ -1736,6 +1849,15 @@ const s = StyleSheet.create({
     borderRadius: 9,
     padding: 13,
     marginBottom: 15,
+  },
+  autoExplanation: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    backgroundColor: "#EEF3E8",
+    borderRadius: 9,
+    padding: 13,
+    marginTop: 15,
   },
   timer: { fontSize: 13, color: C.muted, fontVariant: ["tabular-nums"] },
   transcriptBox: { backgroundColor: "#F5F7F1", padding: 17, borderRadius: 8 },

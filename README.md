@@ -1,6 +1,6 @@
 # Co-Wingman (Wings)
 
-Co-Wingman is an Android-first conversation assistant that offers short questions and gentle suggestions while keeping the person—not the assistant—at the center. This repository is a working local MVP with Milestones 1–3 implemented for the Gator Hacks project.
+Co-Wingman is an Android-first conversation assistant that offers short questions and gentle suggestions while keeping the person—not the assistant—at the center. This repository is a working local MVP with Milestones 1–4 implemented for the Gator Hacks project.
 
 The default configuration is an explicit demo: SQLite storage, preset topic-based cues, keyword summaries, and device speech. It needs no cloud account and makes no AI calls. Live integrations exist for Gemini, Google Speech-to-Text, Firestore, and optional Cloud Storage, but require credentials and have not been production-validated. Gemma is an architectural target for Milestone 5, not an implemented provider.
 
@@ -11,10 +11,11 @@ The default configuration is an explicit demo: SQLite storage, preset topic-base
 - `backend/app/core/`: centralized configuration, Firebase/demo authentication, and privacy-safe structured logging.
 - `backend/app/services/`: replaceable inference and summary boundaries.
 - `mobile/src/audioPipeline.ts`: consented rolling capture, ordered upload queue, and pause/resume lifecycle.
+- `mobile/src/difficultyDetector.ts`: local derived-signal scoring and conservative automatic-intervention policy.
 - `backend/app/speech.py`: Google Speech-to-Text adapter for short completed audio chunks.
 - `infra/gcp/`: reference Cloud Run deployment files; no deployment is implied.
 
-See [Architecture](docs/ARCHITECTURE.md), [API contracts](docs/API.md), [Milestone 2 scope](docs/MILESTONE_2.md), [Milestone 3 scope](docs/MILESTONE_3.md), [repository audit](docs/REPOSITORY_AUDIT.md), [observability](docs/OBSERVABILITY.md), and [security](docs/SECURITY.md).
+See [Architecture](docs/ARCHITECTURE.md), [API contracts](docs/API.md), [Milestone 2 scope](docs/MILESTONE_2.md), [Milestone 3 scope](docs/MILESTONE_3.md), [Milestone 4 scope](docs/MILESTONE_4.md), [repository audit](docs/REPOSITORY_AUDIT.md), [observability](docs/OBSERVABILITY.md), and [security](docs/SECURITY.md).
 
 ## Requirements
 
@@ -76,6 +77,8 @@ The Profile screen persists professional context locally in demo mode. On native
 
 In live mode, the user must confirm participant awareness before recording. The client shows a persistent recording badge, captures bounded four-second M4A/WebM chunks with `expo-audio`, queues uploads in order, and appends successful Speech-to-Text results incrementally. Pause stops capture; ending a session discards the unfinished chunk and waits for queued uploads before summarizing. Silent chunks are ignored without stopping capture. Cue speech uses on-device synthesis so Android does not need to download authenticated audio.
 
+Automatic gentle suggestions require a separate per-session opt-in. A local detector uses bounded microphone-level samples and derived transcript counts, requires consecutive high windows, and enforces interaction suppression, cooldown, and session limits. It retains no transcript words or raw audio and is explicitly a conversation-assistance heuristic, not an anxiety, emotion, or health measurement. Manual **Get me unstuck** remains available at all times.
+
 This is near-real-time chunked transcription, not a raw PCM WebSocket or direct gRPC stream. That boundary is deliberate: Expo's managed recorder produces files, while Google streaming recognition requires a gRPC audio stream. A future native capture module can replace the client transport without changing session or transcript contracts.
 
 ## Firebase authentication
@@ -94,6 +97,7 @@ Application Default Credentials are preferred on Google Cloud. The Firebase web 
 
 ```bash
 APP_MODE=demo .venv/bin/pytest backend -q
+npm test --prefix mobile
 npm run typecheck --prefix mobile
 EXPO_HOME=/tmp/wings-expo EXPO_NO_TELEMETRY=1 npm run build --prefix mobile
 cd mobile && EXPO_HOME=/tmp/wings-expo EXPO_NO_TELEMETRY=1 npx expo export --platform android --output-dir /tmp/wings-android-export

@@ -37,6 +37,7 @@ jobs:
           cache: npm
           cache-dependency-path: mobile/package-lock.json
       - run: npm ci --prefix mobile
+      - run: npm test --prefix mobile
       - run: npm run typecheck --prefix mobile
       - run: npm run build --prefix mobile
       - run: npx expo export --platform android --output-dir /tmp/wings-android-export
