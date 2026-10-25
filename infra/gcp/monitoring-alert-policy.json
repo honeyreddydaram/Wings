@@ -1,0 +1,23 @@
+{
+  "displayName": "Co-Wingman sustained Cloud Run 5xx responses",
+  "combiner": "OR",
+  "documentation": {
+    "content": "Investigate the active revision, dependencies, quota and safe request metrics. Roll back with infra/gcp/rollback.sh when the release is implicated.",
+    "mimeType": "text/markdown"
+  },
+  "conditions": [
+    {
+      "displayName": "Any 5xx responses for five minutes",
+      "conditionThreshold": {
+        "filter": "resource.type=\"cloud_run_revision\" AND metric.type=\"run.googleapis.com/request_count\" AND metric.labels.response_code_class=\"5xx\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "300s",
+        "aggregations": [
+          {"alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_RATE", "crossSeriesReducer": "REDUCE_SUM", "groupByFields": ["resource.label.service_name"]}
+        ]
+      }
+    }
+  ],
+  "alertStrategy": {"autoClose": "1800s"}
+}

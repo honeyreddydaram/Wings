@@ -46,7 +46,14 @@ class Settings:
     log_format: str
     otel_enabled: bool
     otel_service_name: str
+    otel_exporter_otlp_endpoint: str | None
+    otel_sample_ratio: float
     public_base_url: str
+    edge_rate_limit_per_minute: int
+    provider_budget_per_minute: int
+    session_access_ttl_hours: int
+    session_storage_ttl_days: int
+    summary_object_ttl_days: int
 
 
 def load_settings() -> Settings:
@@ -80,7 +87,14 @@ def load_settings() -> Settings:
         log_format=os.getenv("LOG_FORMAT", "json").lower(),
         otel_enabled=_bool("OTEL_ENABLED"),
         otel_service_name=os.getenv("OTEL_SERVICE_NAME", "cowingman-api"),
+        otel_exporter_otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+        otel_sample_ratio=float(os.getenv("OTEL_SAMPLE_RATIO", "0.1")),
         public_base_url=os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/"),
+        edge_rate_limit_per_minute=int(os.getenv("EDGE_RATE_LIMIT_PER_MINUTE", "180")),
+        provider_budget_per_minute=int(os.getenv("PROVIDER_BUDGET_PER_MINUTE", "60")),
+        session_access_ttl_hours=int(os.getenv("SESSION_ACCESS_TTL_HOURS", "2")),
+        session_storage_ttl_days=int(os.getenv("SESSION_STORAGE_TTL_DAYS", "1")),
+        summary_object_ttl_days=int(os.getenv("SUMMARY_OBJECT_TTL_DAYS", "30")),
     )
     if settings.app_mode not in {"demo", "live"}:
         raise RuntimeError("APP_MODE must be 'demo' or 'live'")
@@ -98,6 +112,14 @@ def load_settings() -> Settings:
         raise RuntimeError("INFERENCE_TIMEOUT_SECONDS must be between 1 and 60")
     if not 0 <= settings.inference_max_retries <= 3:
         raise RuntimeError("INFERENCE_MAX_RETRIES must be between 0 and 3")
+    if settings.otel_enabled and not settings.otel_exporter_otlp_endpoint:
+        raise RuntimeError("OTEL_ENABLED requires OTEL_EXPORTER_OTLP_ENDPOINT")
+    if not 0 <= settings.otel_sample_ratio <= 1:
+        raise RuntimeError("OTEL_SAMPLE_RATIO must be between 0 and 1")
+    if settings.edge_rate_limit_per_minute < 1 or settings.provider_budget_per_minute < 1:
+        raise RuntimeError("Rate and provider budget limits must be positive")
+    if min(settings.session_access_ttl_hours, settings.session_storage_ttl_days, settings.summary_object_ttl_days) < 1:
+        raise RuntimeError("Retention periods must be positive")
     return settings
 
 

@@ -17,8 +17,8 @@ flowchart TB
     B --> H[AI inference interface<br/>Implemented M5: demo, Gemini, and Vertex AI Gemma adapters]
     B --> I[Summarization<br/>Implemented: bounded and timed checkpoints]
     B --> J[Contact/profile storage<br/>Implemented: profiles, public cards, exchanged contacts, opt-in notes]
-    B --> K[Observability<br/>Implemented: JSON request logs + request IDs<br/>Planned M7: metrics/traces/alerts]
-    D & F & H & I & J & K --> L[Google Cloud services<br/>Adapters/reference deployment only]
+    B --> K[Observability<br/>JSON logs + privacy-safe OTLP spans/metrics<br/>Export opt-in; dashboard/alert assets]
+    D & F & H & I & J & K --> L[Google Cloud services<br/>Adapters and environment-isolated deployment automation]
     L --> L1[Cloud Run]
     L --> L2[Firestore]
     L --> L3[Speech-to-Text]
@@ -41,14 +41,14 @@ The backend remains one deployable service. This is intentional for a hackathon:
 | Boundary | Current implementation | Later evolution |
 |---|---|---|
 | Client/API | REST from one Expo screen plus isolated rolling-audio hook | Native PCM/WebSocket transport only if device testing justifies it |
-| Identity | Firebase Authentication when configured; persistent demo device capability locally; separate session token | OAuth providers, account deletion, and stronger device secret storage |
+| Identity | Firebase Authentication when configured; persistent demo device capability locally; separate session token; full account erasure endpoint | OAuth providers, recovery flows, and stronger device secret storage |
 | Session storage | SQLite or Firestore record adapter in `main.py` | Extract a repository when profile/session schemas evolve |
 | Transcription | Ordered near-real-time chunks to Google Speech-to-Text V2 | Physical-device validation; optional native raw stream later |
 | Assistance signal | Local bounded metering/transcript-derived score plus manual help | Physical-device calibration and venue evaluation |
 | Inference | Deterministic fallback, Gemini compatibility, or Vertex AI Gemma | Live quality, quota, latency, and cost validation |
 | Summary | Keyword/provider summary, independent timed checkpoints, final summary and follow-up | Deployed concurrency and quality validation |
 | Contact/profile data | UID-isolated professional profile and contact snapshots; separate visibility-controlled public cards; opt-in topic summary | Firestore subcollections if document-size or write-contention measurements require them |
-| Telemetry | JSON request completion/failure events | OpenTelemetry metrics/traces and cloud dashboards in M7 |
+| Telemetry | JSON request events plus allowlisted OpenTelemetry operation spans/counters/latency/failures; dashboard and 5xx alert assets | Deployed collector, notification channels, cost/quota metrics, and validated retention |
 
 ## Future real-time pipeline
 
@@ -71,8 +71,8 @@ The four-second path should remain local where practical and emit only derived v
 
 ## Data lifecycle
 
-Raw uploaded audio is held in memory and cleared after the request. Recent transcript fragments remain in active session storage until they are summarized or the session ends. Session records receive a Firestore TTL field in live mode; SQLite demo files persist until the local database is removed. Profiles and opt-in contact notes persist until their respective deletion actions. Deleting a profile does not delete the Firebase account or conversation records. Provider-side retention is controlled by provider policy and is not guaranteed by this code.
+Raw uploaded audio is held in memory and cleared after the request. Recent transcript fragments remain in active session storage until they are summarized or the session ends. Session access expires after two hours and live Firestore records receive a one-day TTL; SQLite demo files persist until local deletion. Profiles, cards, contacts, and opt-in notes persist until their specific or account-wide deletion action. The full account route also deletes owned sessions, remembered notes, optional summary objects, public-card pointers, and Firebase identity. Provider-side transient retention remains controlled by provider policy.
 
 ## Milestone sequence
 
-M1 established the foundation; M2 added Firebase authentication and profiles; M3 added rolling audio, incremental transcription, and device voice; M4 implements conservative assistance signals; M5 adds Gemma; M6 adds digital identity/contact exchange; M7 completes telemetry, privacy controls, and deployment; M8 integrates and validates the demo end to end.
+M1 established the foundation; M2 added Firebase authentication and profiles; M3 added rolling audio, incremental transcription, and device voice; M4 implemented conservative assistance signals; M5 added Gemma; M6 added digital identity/contact exchange; M7 added local telemetry, privacy controls, operational safeguards, and deployment automation. M8 integrates and validates the system end to end on deployed services and physical devices.

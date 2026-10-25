@@ -36,7 +36,7 @@ Milestone 1 introduced centralized settings and logging under `backend/app/core`
 - Summary checkpoints are based on character-window growth, not elapsed two-minute intervals.
 - SQLite records have no automatic TTL cleanup. Contact notes have no TTL in either storage mode.
 - Provider failures are mapped to generic API errors; audio has one bounded retry, but exponential backoff and server circuit breaking remain absent.
-- OpenTelemetry, Sentry, dashboards, alerts, cost telemetry, and end-to-end latency metrics are documented only.
+- OpenTelemetry operation spans/metrics, privacy allowlists, a Cloud Run dashboard, and a base 5xx alert are implemented locally; collector connectivity, notification delivery, cost/quota metrics, and end-to-end mobile latency remain deployment work. Sentry is intentionally deferred.
 - The legacy AWS infrastructure files do not match the active Google Cloud architecture.
 - `npm audit` reports eleven dependency findings (ten high, one moderate) across the Expo toolchain and Firebase’s bundled Firestore dependency. The app imports Firebase Auth only, but the advisories remain in the installed tree; suggested major downgrades are not safe automatic remediations.
 
@@ -55,7 +55,7 @@ The highest-value splits are provider-independent inference, summaries, and auth
 
 ## Hardcoded or startup configuration found
 
-Previously, model names, TTS model, audio size, logging level, and future timing values were hardcoded or absent. They now have environment-backed settings. Still intentionally hardcoded are the two-hour session lifetime, 40 requests/minute/session, 800/400-character context bounds, prompt safety text, 24 kHz TTS wrapping, and demo cue content. These are product policy or provider-format constants and should become settings only when operational tuning demonstrates a need.
+Model names, TTS model, audio size, logging, telemetry, retention periods, process rate limits, and provider budgets now have environment-backed settings. Still intentionally hardcoded are the 40 requests/minute/session limit, 800/400-character context bounds, prompt safety text, 24 kHz TTS wrapping, and demo cue content. These are product policy or provider-format constants and should become settings only when operational tuning demonstrates a need.
 
 ## Immediate risks
 
@@ -67,8 +67,8 @@ Previously, model names, TTS model, audio size, logging level, and future timing
 
 ## Recommended future improvements
 
-- M2 follow-up: validate Firebase sign-in on Android and implement complete account deletion/password recovery.
+- M2 follow-up: validate Firebase sign-in and account erasure on Android; implement password recovery.
 - M3 follow-up: add physical-device audio fixtures, upload retry/backoff, and latency measurements against a deployed Speech endpoint.
 - M4: implement local derived-feature interfaces, cooldowns, explicit opt-in, and false-positive evaluation.
 - M5: add a real Gemma provider adapter and contract tests instead of reusing a Gemini model-name assumption.
-- M7: add OpenTelemetry SDK/exporters only with redaction tests and configured backends; establish retention controls and dashboards.
+- M7 follow-up: deploy the OTLP collector/export path, notification channels, distributed edge control, budget alerts, and rehearse backup/restore and erasure.

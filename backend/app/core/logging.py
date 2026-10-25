@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 
 from .config import Settings
+from .observability import observe, safe_attributes
 
 
 class JsonFormatter(logging.Formatter):
@@ -62,26 +63,32 @@ def install_request_logging(app: FastAPI, logger: logging.Logger) -> None:
         request_id = _request_id(request.headers.get("x-request-id"))
         request.state.request_id = request_id
         started = time.perf_counter()
-        try:
-            response = await call_next(request)
-        except Exception:
+        with observe("http.server", component="http", operation="request", **{"http.method": request.method}) as span:
+            try:
+                response = await call_next(request)
+            except Exception:
+                route = request.scope.get("route")
+                logger.exception(
+                    "request_failed",
+                    extra={"request_id": request_id, "method": request.method, "route": route.path if route else "<unmatched>"},
+                )
+                raise
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            response.headers["X-Request-ID"] = request_id
             route = request.scope.get("route")
-            logger.exception(
-                "request_failed",
-                extra={"request_id": request_id, "method": request.method, "route": route.path if route else "<unmatched>"},
+            span.set_attributes(safe_attributes({
+                "http.route": route.path if route else "unmatched",
+                "http.status_code": response.status_code,
+                "outcome": "success" if response.status_code < 500 else "failure",
+            }))
+            logger.info(
+                "request_completed",
+                extra={
+                    "request_id": request_id,
+                    "method": request.method,
+                    "route": route.path if route else "<unmatched>",
+                    "status_code": response.status_code,
+                    "duration_ms": duration_ms,
+                },
             )
-            raise
-        duration_ms = round((time.perf_counter() - started) * 1000, 2)
-        response.headers["X-Request-ID"] = request_id
-        route = request.scope.get("route")
-        logger.info(
-            "request_completed",
-            extra={
-                "request_id": request_id,
-                "method": request.method,
-                "route": route.path if route else "<unmatched>",
-                "status_code": response.status_code,
-                "duration_ms": duration_ms,
-            },
-        )
-        return response
+            return response

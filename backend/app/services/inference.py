@@ -10,6 +10,8 @@ from google.auth import default as google_auth_default
 from google.auth.transport.requests import Request as GoogleAuthRequest
 
 from ..core.config import Settings
+from ..core.limits import BudgetExceeded, claim_provider_budget
+from ..core.observability import observe
 
 
 class InferenceUnavailable(RuntimeError):
@@ -99,9 +101,19 @@ async def generate_text(settings: Settings, prompt: str, schema: dict | None = N
     last_error: Exception | None = None
     for attempt in range(settings.inference_max_retries + 1):
         try:
-            result = await request(settings, prompt, schema)
+            claim_provider_budget(settings)
+            with observe(
+                "inference.generate",
+                component="inference",
+                operation="generate",
+                provider=settings.inference_provider,
+                model=settings.gemma_model if settings.inference_provider == "gemma" else settings.inference_model,
+            ):
+                result = await request(settings, prompt, schema)
             reset_circuit()
             return result
+        except BudgetExceeded as error:
+            raise InferenceUnavailable("Provider request budget reached") from error
         except (httpx.HTTPError, KeyError, IndexError, TypeError, InferenceUnavailable) as error:
             last_error = error
             retryable = not isinstance(error, httpx.HTTPStatusError) or error.response.status_code in {408, 429, 500, 502, 503, 504}

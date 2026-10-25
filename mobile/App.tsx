@@ -12,6 +12,7 @@ import {
   Switch,
   Linking,
   Share,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
@@ -296,7 +297,7 @@ export default function App() {
   }
   async function identityFetch(path: string, init: RequestInit = {}) {
     const token = firebaseConfigured ? await getIdentityToken() : null;
-    if (firebaseConfigured && !token) throw new Error("Sign in to access cards and contacts.");
+    if (firebaseConfigured && !token) throw new Error("Sign in to access your account data.");
     const response = await fetch(API + path, {
       ...init,
       headers: {
@@ -310,6 +311,38 @@ export default function App() {
       throw new Error(detail.detail || `Request failed (${response.status})`);
     }
     return response;
+  }
+  async function showPrivacyInventory() {
+    await run("Reviewing stored data", async () => {
+      const response = await identityFetch("/privacy/me");
+      const data = await response.json();
+      Alert.alert(
+        "Stored data",
+        `Profile: ${data.profile ? "yes" : "no"}\nCard: ${data.card ? "yes" : "no"}\nContacts: ${data.contacts}\nSessions awaiting TTL deletion: ${data.sessions}\nRemembered conversations: ${data.remembered_conversations}\n\nSessions expire from storage after ${data.retention.session_storage_days} day(s); profile, card, and contacts remain until deleted.`,
+      );
+    });
+  }
+  function confirmAccountDeletion() {
+    Alert.alert(
+      "Delete all account data?",
+      "This removes your profile, public card, contacts, conversation sessions, remembered notes, stored summaries, and Firebase sign-in account where configured. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete everything",
+          style: "destructive",
+          onPress: () => void run("Deleting your account data", async () => {
+            await identityFetch("/account/me", { method: "DELETE" });
+            if (firebaseConfigured) await signOutUser();
+            setProfile(EMPTY_PROFILE);
+            setCard(EMPTY_CARD);
+            setContacts([]);
+            setSession(null);
+            setEnded(null);
+          }),
+        },
+      ],
+    );
   }
   async function loadExchange() {
     try {
@@ -1191,6 +1224,18 @@ export default function App() {
                         setProfile(EMPTY_PROFILE);
                       })
                     }
+                  />
+                  <Button
+                    text="Review stored data"
+                    outline
+                    icon="shield-checkmark-outline"
+                    onPress={showPrivacyInventory}
+                  />
+                  <Button
+                    text="Delete all account data"
+                    outline
+                    icon="warning-outline"
+                    onPress={confirmAccountDeletion}
                   />
                 </View>
               </View>

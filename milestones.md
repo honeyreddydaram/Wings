@@ -337,7 +337,7 @@ Reference: [Milestone 6 details](docs/MILESTONE_6.md).
 
 ## Milestone 7 — Observability, Privacy, and Cloud Deployment
 
-**Status: Pending**
+**Status: Complete locally; deployed-cloud, IAM, alert-delivery, restore, and legal validation pending**
 
 ### Objective
 
@@ -345,38 +345,42 @@ Deploy the system with measurable reliability, explicit retention and deletion b
 
 ### Google Cloud deployment
 
-- [ ] Provision separate development/demo and production-like projects or environments.
+- [x] Add environment-isolated deployment configuration, service identities, service names, and Firestore collections.
+- [ ] Provision and validate separate development/demo and production-like Google Cloud projects.
 - [ ] Deploy FastAPI to Cloud Run with least-privilege service identity.
 - [ ] Configure Firebase Authentication, Firestore, Speech-to-Text, Gemma hosting, Secret Manager, and optional Cloud Storage.
 - [ ] Validate Firestore indexes, transaction contention, TTL policy, backups, and restore procedures.
-- [ ] Configure Cloud Storage lifecycle and deletion behavior if summaries are stored there.
+- [x] Add Cloud Storage lifecycle, bucket-scoped deletion permission, and account-erasure behavior for optional summaries.
 - [ ] Configure domain, HTTPS, CORS, Android network security, and environment promotion.
-- [ ] Add deployment smoke tests and rollback instructions.
+- [x] Add deployment smoke tests and executable rollback instructions.
 
 ### Observability
 
-- [ ] Install and configure OpenTelemetry SDKs and exporters.
-- [ ] Add redacted spans around HTTP, storage, audio ingestion, speech recognition, detection, inference, TTS, and summaries.
-- [ ] Emit latency, failure, intervention, queue, resource, quota, and cost metrics.
-- [ ] Configure Cloud Logging, Monitoring, Trace, dashboards, and alerts.
-- [ ] Evaluate Sentry only after redaction and data-location requirements are understood.
-- [ ] Add telemetry tests that reject transcript, audio, credentials, profile fields, contact data, and prompts.
+- [x] Install and configure OpenTelemetry SDKs and an OTLP/HTTP exporter behind an explicit opt-in.
+- [x] Add allowlisted spans and operation metrics around HTTP, storage, audio/speech, inference, server TTS, and summaries; local detector features remain intentionally unexported.
+- [x] Emit generic operation counts, latency histograms, and failure counters without user/session identifiers.
+- [x] Add Cloud Logging-compatible output plus versioned Cloud Run dashboard and 5xx alert configurations.
+- [x] Evaluate and defer Sentry until redaction, data-location, retention, and vendor approval requirements are understood.
+- [x] Add telemetry tests that reject transcript, audio, credentials, profile fields, contact data, prompts, and arbitrary identifiers.
+- [ ] Connect a reviewed OTLP collector, notification channels, quota/cost metrics, and alert delivery in each deployed environment.
 
 ### Security and privacy completion
 
-- [ ] Add API-edge rate limiting, abuse controls, and budget/quota guards.
-- [ ] Implement complete account, profile, contact, session, summary-object, and provider-copy deletion workflows where supported.
-- [ ] Define and enforce retention periods for every data type.
+- [x] Add per-process API-edge limiting, existing session/public-card limits, provider-call budget guards, and Cloud Run scale bounds.
+- [ ] Deploy a distributed edge control, direct-origin protection, bot policy, billing budget, and provider quotas.
+- [x] Implement authenticated account, profile, contact, session, remembered-note, summary-object, and Firebase-identity deletion workflows where supported.
+- [x] Define and enforce access/storage retention periods for application-managed data types.
 - [ ] Validate Firebase, Firestore, Storage, Cloud Run, and Secret Manager IAM/rules.
-- [ ] Add dependency scanning and a supported remediation policy.
-- [ ] Create incident-response, key-rotation, audit, and privacy runbooks.
-- [ ] Perform threat modeling and privacy/legal review for recording and third-party data use.
+- [x] Add dependency scanning, weekly update automation, a critical production gate, and a supported remediation policy.
+- [x] Create incident-response, key-rotation, backup/restore, audit-evidence, retention, and privacy runbooks.
+- [x] Create and document the engineering threat model.
+- [ ] Complete privacy/legal review for recording, consent, provider retention, and third-party data use.
 
 ### Exit criteria
 
 - [ ] The deployed service has passing smoke tests, dashboards, alerts, rollback, and cost limits.
-- [ ] Telemetry redaction tests pass.
-- [ ] Retention and deletion controls are demonstrably enforced.
+- [x] Telemetry redaction tests pass locally.
+- [x] Retention and deletion controls are enforced in local contract tests.
 - [ ] IAM and security rules have been reviewed in the deployed environment.
 
 ---
@@ -427,14 +431,14 @@ Validate the complete Android experience, harden recovery paths, and deliver a p
 
 ## Current next actions
 
-1. Begin Milestone 4 with a device-independent feature and policy interface.
-2. In parallel, run the unchecked M2/M3 Firebase, Speech-to-Text, and physical Android validations.
-3. Preserve the manual assistance path and demo mode while adding automatic signals.
-4. Record latency and false-positive baselines before choosing M4 thresholds.
+1. Begin Milestone 8 integration, recovery, accessibility, performance, and demonstration validation.
+2. Provision separate development and production-like Google Cloud projects and execute the M2–M7 external checks.
+3. Validate Firebase, Speech-to-Text, Gemma, QR/audio/device behavior, telemetry export, alerts, backup/restore, and deletion with non-production data.
+4. Complete privacy/legal, IAM, dependency-exception, and threat-model reviews before real-conversation use.
 
 ## Current validation snapshot
 
-- [x] Backend test suite: 9 tests passing.
+- [x] Backend test suite: 22 tests passing across M1–M7 privacy, deletion, telemetry, inference, audio, card, and contact contracts.
 - [x] TypeScript type checking passing.
 - [x] Expo web export passing.
 - [x] Expo Android export passing.
@@ -442,4 +446,5 @@ Validate the complete Android experience, harden recovery paths, and deliver a p
 - [x] Secret-pattern scan and Git whitespace validation passing.
 - [ ] Deployed Firebase/Google Cloud end-to-end test.
 - [ ] Physical Android audio and authentication test.
-- [ ] Production security, privacy, retention, observability, and performance validation.
+- [x] Local M7 security, privacy, retention, observability, deployment, smoke, rollback, and runbook implementation.
+- [ ] Deployed production-like security, privacy, retention, observability, restore, alert, cost, and performance validation.

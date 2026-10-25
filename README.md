@@ -1,6 +1,6 @@
 # Co-Wingman (Wings)
 
-Co-Wingman is an Android-first conversation assistant that offers short questions and gentle suggestions while keeping the person—not the assistant—at the center. This repository is a working local MVP with Milestones 1–6 implemented for the Gator Hacks project.
+Co-Wingman is an Android-first conversation assistant that offers short questions and gentle suggestions while keeping the person—not the assistant—at the center. This repository is a working local MVP with Milestones 1–7 implemented.
 
 The default configuration is an explicit demo: SQLite storage, preset topic-based cues, keyword summaries, and device speech. It needs no cloud account and makes no AI calls. Live integrations exist for Vertex AI Gemma, Gemini compatibility, Google Speech-to-Text, Firestore, and optional Cloud Storage, but require credentials and have not been production-validated.
 
@@ -16,7 +16,7 @@ The default configuration is an explicit demo: SQLite storage, preset topic-base
 - `backend/app/speech.py`: Google Speech-to-Text adapter for short completed audio chunks.
 - `infra/gcp/`: reference Cloud Run deployment files; no deployment is implied.
 
-See [Architecture](docs/ARCHITECTURE.md), [API contracts](docs/API.md), [Milestone 2 scope](docs/MILESTONE_2.md), [Milestone 3 scope](docs/MILESTONE_3.md), [Milestone 4 scope](docs/MILESTONE_4.md), [Milestone 5 scope](docs/MILESTONE_5.md), [Milestone 6 scope](docs/MILESTONE_6.md), [repository audit](docs/REPOSITORY_AUDIT.md), [observability](docs/OBSERVABILITY.md), and [security](docs/SECURITY.md).
+See [Architecture](docs/ARCHITECTURE.md), [API contracts](docs/API.md), [Milestone 2 scope](docs/MILESTONE_2.md), [Milestone 3 scope](docs/MILESTONE_3.md), [Milestone 4 scope](docs/MILESTONE_4.md), [Milestone 5 scope](docs/MILESTONE_5.md), [Milestone 6 scope](docs/MILESTONE_6.md), [Milestone 7 scope](docs/MILESTONE_7.md), [repository audit](docs/REPOSITORY_AUDIT.md), [observability](docs/OBSERVABILITY.md), [privacy retention](docs/PRIVACY_RETENTION.md), and [security](docs/SECURITY.md).
 
 ## Requirements
 
@@ -70,7 +70,7 @@ For native development, run `npx expo start`. A physical device cannot reach you
 5. Select **Get me unstuck** to receive two questions and one suggestion.
 6. End the conversation to see a bounded topic summary. Active fragments are cleared; notes persist only when opted in.
 
-Demo mode does not record or transcribe microphone audio, call cloud AI, diagnose anxiety, or simulate the future four-second audio classifier.
+Demo mode does not record or transcribe microphone audio, call cloud AI, diagnose anxiety, or exercise the live microphone-meter detector.
 
 The Profile screen persists professional context locally in demo mode. On native devices, the demo identity now survives restarts through AsyncStorage.
 
@@ -118,7 +118,8 @@ The complete annotated list is in `backend/.env.example`. Key groups are:
 - Google speech: `GOOGLE_CLOUD_PROJECT`, `SPEECH_LOCATION`, `SPEECH_LANGUAGE`.
 - Audio pipeline: backend `AUDIO_WINDOW_SECONDS`/`MAX_AUDIO_BYTES` and client `EXPO_PUBLIC_AUDIO_CHUNK_SECONDS`; keep the chunk duration aligned.
 - Summary pipeline: `SUMMARY_CHECKPOINT_SECONDS` controls independent checkpoint scheduling.
-- Telemetry: `LOG_LEVEL`, `LOG_FORMAT`, `OTEL_ENABLED`, `OTEL_SERVICE_NAME`. OpenTelemetry export is not implemented yet.
+- Telemetry: `LOG_LEVEL`, `LOG_FORMAT`, `OTEL_ENABLED`, `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, and `OTEL_SAMPLE_RATIO`.
+- Safeguards/retention: `EDGE_RATE_LIMIT_PER_MINUTE`, `PROVIDER_BUDGET_PER_MINUTE`, `SESSION_ACCESS_TTL_HOURS`, `SESSION_STORAGE_TTL_DAYS`, and `SUMMARY_OBJECT_TTL_DAYS`.
 
 Use `APP_MODE=live`, a Firestore collection, and `INFERENCE_PROVIDER=gemma` only in a configured server environment with Vertex AI access. Demo mode never requires Google credentials. Gemini remains a separate compatibility adapter.
 
@@ -135,8 +136,8 @@ Use `APP_MODE=live`, a Firestore collection, and `INFERENCE_PROVIDER=gemma` only
 
 ## Current limitations and next milestones
 
-Firebase authentication, profiles, rolling audio, local assistance detection, Gemma integration, and controlled card/contact exchange are implemented locally but still need validation against a real Firebase/Google Cloud project and physical Android device. Session capability tokens remain in memory, and there is no raw PCM streaming, clinical anxiety detection, universal phone-to-phone NFC exchange, résumé-file ingestion, production alerting, or deployed dashboard. Operational logs are structured and omit request bodies and credentials, but full tracing/metrics arrives in Milestone 7.
+Firebase authentication, profiles, rolling audio, local assistance detection, Gemma integration, controlled card/contact exchange, privacy-safe OpenTelemetry, account erasure, and deployment operations are implemented locally but still need validation against real Firebase/Google Cloud projects and physical Android devices. Session capability tokens remain in memory, and there is no raw PCM streaming, clinical anxiety detection, universal phone-to-phone NFC exchange, résumé-file ingestion, deployed alert delivery, or verified dashboard.
 
-Milestone 7 is next: observability, privacy completion, and Google Cloud deployment. The remaining roadmap is described in [Architecture](docs/ARCHITECTURE.md).
+Milestone 8 is next: full integration, physical-device validation, recovery/performance testing, and release demonstration. The remaining roadmap is described in [milestones.md](milestones.md).
 
 For deployment-specific caveats, see [Google Cloud deployment](infra/gcp/README.md).

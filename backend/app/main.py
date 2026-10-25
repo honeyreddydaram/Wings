@@ -23,6 +23,8 @@ from pydantic import BaseModel, Field
 from .core.auth import resolve_identity
 from .core.config import settings
 from .core.logging import configure_logging, install_request_logging
+from .core.limits import install_edge_limits
+from .core.observability import configure_telemetry, observe, safe_attributes
 from .schemas.profiles import Profile, ProfileUpdate
 from .schemas.cards import Card, CardUpdate, Contact, ContactCreate, ContactUpdate, ConversationNoteLink, PublicCard
 from .services.cards import SLUG_PATTERN, card_html, public_projection, qr_svg, vcard
@@ -36,8 +38,10 @@ DB = settings.database_path
 TABLE = settings.firestore_collection
 GEMINI_KEY = settings.gemini_api_key
 log = configure_logging(settings)
+configure_telemetry(settings)
 app = FastAPI(title='Co-Wingman', version='0.1.0')
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=['GET','POST','PUT','DELETE'], allow_headers=['Authorization','Content-Type','X-Request-ID','X-Demo-Owner'], expose_headers=['X-Request-ID'])
+install_edge_limits(app, settings)
 install_request_logging(app, log)
 
 @contextmanager
@@ -51,49 +55,73 @@ def database():
         con.close()
 
 def read(key):
-    if TABLE:
-        from google.cloud import firestore
-        item = firestore.Client().collection(TABLE).document(key).get()
-        return json.loads(item.to_dict()['body']) if item.exists else None
-    with database() as con:
-        row = con.execute('SELECT body FROM records WHERE id=?', (key,)).fetchone()
-        return json.loads(row[0]) if row else None
+    provider = 'firestore' if TABLE else 'sqlite'
+    with observe('storage.read', component='storage', operation='read', provider=provider):
+        if TABLE:
+            from google.cloud import firestore
+            item = firestore.Client().collection(TABLE).document(key).get()
+            return json.loads(item.to_dict()['body']) if item.exists else None
+        with database() as con:
+            row = con.execute('SELECT body FROM records WHERE id=?', (key,)).fetchone()
+            return json.loads(row[0]) if row else None
 
 def write(key, value):
     version = value.get('_version', 0)
     guarded = key.startswith('session:')
     updated = dict(value, _version=version+1)
     body = json.dumps(updated)
-    if TABLE:
-        from google.cloud import firestore
-        client = firestore.Client()
-        ref = client.collection(TABLE).document(key)
-        item = {'body': body, 'version': version+1}
-        if guarded:
-            item['expires_at'] = datetime.now(timezone.utc) + timedelta(days=1)
-        @firestore.transactional
-        def save(transaction):
-            old = ref.get(transaction=transaction)
-            if guarded and old.exists and old.to_dict().get('version', 0) != version:
-                raise HTTPException(409, 'Session changed. Please try again.')
-            transaction.set(ref, item)
-        save(client.transaction())
-    else:
-        with database() as con:
-            con.execute('BEGIN IMMEDIATE')
-            old = con.execute('SELECT body FROM records WHERE id=?', (key,)).fetchone()
-            if guarded and old and json.loads(old[0]).get('_version',0) != version:
-                raise HTTPException(409, 'Session changed. Please try again.')
-            con.execute('INSERT OR REPLACE INTO records VALUES (?, ?)', (key, body))
+    provider = 'firestore' if TABLE else 'sqlite'
+    with observe('storage.write', component='storage', operation='write', provider=provider):
+        if TABLE:
+            from google.cloud import firestore
+            client = firestore.Client()
+            ref = client.collection(TABLE).document(key)
+            item = {'body': body, 'version': version+1}
+            if guarded:
+                item['expires_at'] = datetime.now(timezone.utc) + timedelta(days=settings.session_storage_ttl_days)
+            @firestore.transactional
+            def save(transaction):
+                old = ref.get(transaction=transaction)
+                if guarded and old.exists and old.to_dict().get('version', 0) != version:
+                    raise HTTPException(409, 'Session changed. Please try again.')
+                transaction.set(ref, item)
+            save(client.transaction())
+        else:
+            with database() as con:
+                con.execute('BEGIN IMMEDIATE')
+                old = con.execute('SELECT body FROM records WHERE id=?', (key,)).fetchone()
+                if guarded and old and json.loads(old[0]).get('_version',0) != version:
+                    raise HTTPException(409, 'Session changed. Please try again.')
+                con.execute('INSERT OR REPLACE INTO records VALUES (?, ?)', (key, body))
     value['_version'] = version+1
 
 def delete(key):
+    provider = 'firestore' if TABLE else 'sqlite'
+    with observe('storage.delete', component='storage', operation='delete', provider=provider):
+        if TABLE:
+            from google.cloud import firestore
+            firestore.Client().collection(TABLE).document(key).delete()
+        else:
+            with database() as con:
+                con.execute('DELETE FROM records WHERE id=?', (key,))
+
+def scan_records():
+    """Administrative scan used only by authenticated account erasure."""
     if TABLE:
         from google.cloud import firestore
-        firestore.Client().collection(TABLE).document(key).delete()
+        for item in firestore.Client().collection(TABLE).stream():
+            data = item.to_dict() or {}
+            try:
+                yield item.id, json.loads(data.get('body', '{}'))
+            except (TypeError, json.JSONDecodeError):
+                continue
     else:
         with database() as con:
-            con.execute('DELETE FROM records WHERE id=?', (key,))
+            for key, body in con.execute('SELECT id, body FROM records'):
+                try:
+                    yield key, json.loads(body)
+                except json.JSONDecodeError:
+                    continue
 
 class Start(BaseModel):
     name: str = Field(default='Someone new', max_length=100)
@@ -185,7 +213,8 @@ def authorize(sid, request):
     return state
 
 async def summarize(text):
-    return await summarize_text(settings, text)
+    with observe('summary.generate', component='summary', operation='generate', provider=settings.inference_provider):
+        return await summarize_text(settings, text)
 
 @app.get('/healthz')
 def health():
@@ -231,6 +260,79 @@ def delete_profile(request: Request):
     identity = resolve_identity(settings, request)
     delete(profile_key(identity.user_id))
     return {'deleted':True}
+
+@app.get('/privacy/me')
+def privacy_inventory(request: Request):
+    identity = resolve_identity(settings, request)
+    owned_sessions = 0
+    remembered_contacts = 0
+    for key, value in scan_records():
+        if key.startswith('session:') and value.get('owner_id') == identity.user_id:
+            owned_sessions += 1
+        elif key.startswith('contact:') and value.get('owner_id') == identity.user_id:
+            remembered_contacts += 1
+    contacts = (read(contact_store(identity)) or {}).get('items', [])
+    return {
+        'profile': read(profile_key(identity.user_id)) is not None,
+        'card': read(owner_key('card', identity.user_id)) is not None,
+        'contacts': len(contacts),
+        'sessions': owned_sessions,
+        'remembered_conversations': remembered_contacts,
+        'retention': {
+            'session_access_hours': settings.session_access_ttl_hours,
+            'session_storage_days': settings.session_storage_ttl_days,
+            'summary_object_days': settings.summary_object_ttl_days,
+            'profile_card_contacts': 'until_deleted',
+        },
+    }
+
+@app.delete('/account/me')
+def delete_account(request: Request):
+    """Erase application data, optional summary objects, then Firebase identity."""
+    identity = resolve_identity(settings, request)
+    card_key = owner_key('card', identity.user_id)
+    card = read(card_key)
+    keys = {
+        profile_key(identity.user_id), card_key, owner_key('contacts', identity.user_id),
+    }
+    if card and card.get('slug'):
+        keys.add('public-card:'+card['slug'])
+    session_ids: list[str] = []
+    for key, value in scan_records():
+        if key.startswith('session:') and value.get('owner_id') == identity.user_id:
+            keys.add(key)
+            session_ids.append(key.removeprefix('session:'))
+            if value.get('contact_key'):
+                keys.add(value['contact_key'])
+        elif key.startswith('contact:') and value.get('owner_id') == identity.user_id:
+            keys.add(key)
+    for key in keys:
+        delete(key)
+
+    deleted_objects = 0
+    if settings.summary_bucket:
+        try:
+            from google.cloud import storage
+            with observe('storage.summary_delete', component='storage', operation='delete', provider='cloud_storage'):
+                bucket = storage.Client().bucket(settings.summary_bucket)
+                for sid in session_ids:
+                    for blob in bucket.list_blobs(prefix=f'summaries/{sid}/'):
+                        blob.delete()
+                        deleted_objects += 1
+        except Exception as error:
+            log.warning('account_summary_delete_failed', extra={'exception_type': type(error).__name__})
+            raise HTTPException(503, 'Account data was removed, but summary-object deletion needs operator follow-up.')
+
+    identity_deleted = identity.provider != 'firebase'
+    if identity.provider == 'firebase':
+        try:
+            from firebase_admin import auth
+            auth.delete_user(identity.user_id)
+            identity_deleted = True
+        except Exception as error:
+            log.warning('account_identity_delete_failed', extra={'exception_type': type(error).__name__})
+            raise HTTPException(503, 'Application data was removed, but identity deletion needs operator follow-up.')
+    return {'deleted': True, 'records': len(keys), 'summary_objects': deleted_objects, 'identity_deleted': identity_deleted}
 
 @app.get('/card/me', response_model=Card)
 def get_card(request: Request):
@@ -361,7 +463,7 @@ def start(body: Start, request: Request):
     sid, token = str(uuid.uuid4()), secrets.token_urlsafe(32)
     ck = contact_key(identity.user_id, body.contact or body.name)
     memory = read(ck) if body.remember else None
-    state = {'id':sid,'owner_id':identity.user_id,'name':body.name,'context':body.context,'contact_key':ck,'remember':body.remember,'memory':(memory or {}).get('summary',''),'summary':'','fragments':[],'cues':[],'audio_chunks':{},'token_hash':hashlib.sha256(token.encode()).hexdigest(),'expires':time.time()+7200,'signal':'low','checkpoint_seq':0,'next_checkpoint_at':time.time()+settings.summary_checkpoint_seconds}
+    state = {'id':sid,'owner_id':identity.user_id,'name':body.name,'context':body.context,'contact_key':ck,'remember':body.remember,'memory':(memory or {}).get('summary',''),'summary':'','fragments':[],'cues':[],'audio_chunks':{},'token_hash':hashlib.sha256(token.encode()).hexdigest(),'expires':time.time()+(settings.session_access_ttl_hours*3600),'signal':'low','checkpoint_seq':0,'next_checkpoint_at':time.time()+settings.summary_checkpoint_seconds}
     write('session:'+state['id'],state)
     return {'id':sid,'token':token,'memory':state['memory'],'mode':MODE}
 
@@ -442,7 +544,11 @@ async def audio(
     try:
         from .speech import transcribe
         try:
-            text = await transcribe(data)
+            with observe(
+                'speech.recognize', component='speech', operation='recognize', provider='google',
+                **{'audio.format': (file.content_type or 'unknown').split('/')[-1], 'audio.size_bucket': 'small' if len(data) < 1_000_000 else 'large'},
+            ):
+                text = await transcribe(data)
         except Exception:
             raise HTTPException(502,'Google transcription unavailable. Check audio format, duration, and Speech API access.')
         if not text:
@@ -498,10 +604,11 @@ async def speak(sid: str, cid: str, request: Request):
     if MODE=='demo':
         raise HTTPException(503,'Demo voice uses device speech synthesis')
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post('https://generativelanguage.googleapis.com/v1beta/models/'+settings.tts_model+':generateContent',headers={'x-goog-api-key':GEMINI_KEY},json={'contents':[{'parts':[{'text':'Say gently: '+cue['text']}]}],'generationConfig':{'responseModalities':['AUDIO'],'speechConfig':{'voiceConfig':{'prebuiltVoiceConfig':{'voiceName':'Kore'}}}}})
-            r.raise_for_status()
-            pcm = base64.b64decode(r.json()['candidates'][0]['content']['parts'][0]['inlineData']['data'])
+        with observe('tts.generate', component='tts', operation='generate', provider='gemini', model=settings.tts_model):
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.post('https://generativelanguage.googleapis.com/v1beta/models/'+settings.tts_model+':generateContent',headers={'x-goog-api-key':GEMINI_KEY},json={'contents':[{'parts':[{'text':'Say gently: '+cue['text']}]}],'generationConfig':{'responseModalities':['AUDIO'],'speechConfig':{'voiceConfig':{'prebuiltVoiceConfig':{'voiceName':'Kore'}}}}})
+                r.raise_for_status()
+                pcm = base64.b64decode(r.json()['candidates'][0]['content']['parts'][0]['inlineData']['data'])
         out = io.BytesIO()
         with wave.open(out,'wb') as wav:
             wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(24000); wav.writeframes(pcm)
@@ -524,12 +631,15 @@ async def end(sid: str, request: Request):
     summary = final.summary
     if state['remember']:
         merged = await summarize(state['memory']+' '+summary)
-        write(state['contact_key'],{'summary':merged})
+        write(state['contact_key'],{'summary':merged, 'owner_id':state['owner_id']})
     bucket = settings.summary_bucket
     if bucket:
         try:
             from google.cloud import storage
-            storage.Client().bucket(bucket).blob(f'summaries/{sid}/{int(time.time())}.json').upload_from_string(json.dumps({'summary':summary}), content_type='application/json')
+            with observe('storage.summary_write', component='storage', operation='write', provider='cloud_storage'):
+                storage.Client().bucket(bucket).blob(f'summaries/{sid}/{int(time.time())}.json').upload_from_string(
+                    json.dumps({'summary':summary}), content_type='application/json'
+                )
         except Exception:
             log.warning('optional_summary_write_failed')
     state.update(ended=True,fragments=[],summary='',cues=[],memory='')

@@ -17,6 +17,12 @@ This is a hackathon baseline, not a claim of production-grade security or legal 
 - Contact notes are opt-in and deletable. Active fragments are cleared when the session ends.
 - Firebase mode verifies client ID tokens with the Admin SDK and binds profiles and new sessions to the verified UID rather than a caller-supplied owner value.
 - Profile fields and list sizes are bounded, isolated by a hashed user key, and deletable through the authenticated API.
+- A privacy inventory and full account-erasure workflow cover application records, card pointers, session memory, optional summary objects, and Firebase identity.
+- A strict OpenTelemetry attribute allowlist prevents application text and identifiers from entering spans or metrics.
+- Per-process edge and provider-budget guards complement session/public-card limits; Cloud Run max instances bound runaway scale.
+- CI audits Python dependencies, blocks critical production npm advisories, and Dependabot checks pinned dependencies weekly.
+
+The remediation and exception process is documented in [DEPENDENCY_POLICY.md](DEPENDENCY_POLICY.md).
 
 ## Consent and product language
 
@@ -28,22 +34,19 @@ Never place service-account credentials, Gemini keys, bearer tokens, or other se
 
 ## Data retention
 
-Firestore session writes include a one-day TTL field, while application access expires after two hours. TTL deletion is asynchronous and must be enabled in the deployed project. SQLite demo records do not expire automatically. Contact notes persist until deletion and have no TTL. Optional summary objects require an independently configured bucket lifecycle. Provider retention remains subject to provider terms. These gaps must be surfaced to users before real-conversation use.
+Firestore session writes use centrally configured one-day TTL fields, while application access expires after two hours. TTL deletion is asynchronous and must be enabled in the deployed project. SQLite demo records do not expire automatically. Profiles, cards, contacts, and opt-in notes persist until deletion. Optional summary objects use a 30-day bucket lifecycle. See [Privacy and retention](PRIVACY_RETENTION.md).
 
 ## Known gaps
 
 - Demo mode still uses a client-generated owner capability and must not be exposed as production authentication.
-- No API gateway, IP/device abuse limit, bot protection, or quota budget.
+- The in-process edge limit is per Cloud Run instance; no distributed Cloud Armor/API Gateway or bot protection has been deployed.
 - Session capability tokens live in React state; Firebase sign-in persistence uses browser storage or native AsyncStorage, which is not equivalent to hardware-backed secret storage.
 - Firestore and Cloud Storage security rules/IAM have not been validated in a deployed project.
-- No encryption-key management beyond provider defaults, security scanning, dependency-update automation, audit trail, or incident response runbook.
-- No complete deletion endpoint for every session record/object/provider copy.
-- Profile deletion does not delete the Firebase Authentication account; complete account deletion remains unimplemented.
+- Encryption-key management remains provider-managed; no customer-managed key design has been reviewed.
+- Account deletion cannot erase provider transient copies beyond supported application stores; provider terms still apply.
 - No formal consent record or jurisdiction-specific privacy review.
 - Live provider payload/retention behavior and Android network security need verification.
-- Rate limits and session TTLs are hardcoded product defaults rather than centrally governed policy.
-- The 2026-10-25 `npm audit` reports ten high and one moderate dependency advisory across the Expo toolchain and Firebase’s bundled but unused Firestore path. Offered major-version downgrades conflict with the current Expo/Firebase stack, so remediation must use supported upstream updates rather than a forced audit fix.
+- Cloud IAM, Firebase rules, TTL execution, backup restore, alert delivery, and deletion must be rehearsed in deployed environments.
+- The 2026-10-25 backend `pip-audit` is clean after supported FastAPI, Starlette, multipart, and pytest upgrades. `npm audit --omit=dev` reports ten high and one moderate advisory across the Expo toolchain and Firebase’s bundled but unused Firestore path, with no critical advisory. Offered forced fixes downgrade or cross incompatible Expo/Firebase versions, so remediation must use supported upstream updates rather than `--force`.
 
-## Milestone 4 security priorities
-
-Validate recording indicators and permission recovery on physical Android devices, define a jurisdiction-appropriate consent flow, and ensure future derived-feature telemetry cannot reconstruct speech. M4 assistance triggers must remain conservative, opt-in, rate-limited, and explicitly non-clinical.
+Operational procedures live under `docs/runbooks/`; the threat model is [THREAT_MODEL.md](THREAT_MODEL.md). These are engineering controls, not legal or compliance certification.

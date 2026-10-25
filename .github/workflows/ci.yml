@@ -42,3 +42,21 @@ jobs:
       - run: npm run build --prefix mobile
       - run: npx expo export --platform android --output-dir /tmp/wings-android-export
         working-directory: mobile
+
+  dependency-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.4'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: python -m pip install pip-audit
+      - run: pip-audit -r backend/requirements.txt
+      - run: npm ci --prefix mobile
+      - name: Block critical production dependency advisories
+        run: npm --prefix mobile audit --omit=dev --audit-level=critical

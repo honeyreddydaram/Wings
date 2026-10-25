@@ -16,7 +16,7 @@ Process liveness. No authentication. Returns `200`:
 
 ### `GET /readyz`
 
-Dependency readiness. No authentication. Demo mode checks SQLite and reports providers as simulated. Live mode checks storage and Gemini model-list authorization.
+Dependency readiness. No authentication. Demo mode checks SQLite and reports providers as simulated. Live mode checks storage and configured inference-provider authorization.
 
 Success (`200`):
 
@@ -24,7 +24,7 @@ Success (`200`):
 {"ready":true,"mode":"demo","checks":{"storage":true,"providers":"simulated"}}
 ```
 
-Live dependency failure returns `503` with `ready: false` and Boolean `storage`/`gemini` checks. This does not validate Speech-to-Text or inference quota.
+Live dependency failure returns `503` with `ready: false` and Boolean storage/inference-auth checks. This does not validate Speech-to-Text or inference quota.
 
 ## Profile
 
@@ -164,3 +164,7 @@ All contact routes require an authenticated identity and use a separate owner-is
 - `GET /contacts.vcf` exports the caller's contacts as concatenated vCards.
 
 Cross-owner IDs return `404`. Contact creation accepts only the documented bounded snapshot, source, and note fields.
+# Privacy and account deletion
+
+- `GET /privacy/me` requires demo/Firebase identity and returns counts plus the active retention policy, never record contents.
+- `DELETE /account/me` requires demo/Firebase identity and deletes owned application records, public-card pointer, optional summary objects, and Firebase identity where configured. A 503 means external cleanup needs operator follow-up.
