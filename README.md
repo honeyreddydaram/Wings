@@ -1,63 +1,110 @@
-# Co-Wingman
+# Co-Wingman (Wings)
 
-A quiet conversation companion: live context first, two questions and a gentle suggestion when you need a nudge. Built from the Co-Wingman blueprint with an Expo/React Native client (including web) and a FastAPI backend.
+Co-Wingman is an Android-first conversation assistant that offers short questions and gentle suggestions while keeping the person—not the assistant—at the center. This repository is a working local MVP and the Milestone 1 foundation for the Gator Hacks project.
 
-## Run locally
+The default configuration is an explicit demo: SQLite storage, preset topic-based cues, keyword summaries, and device speech. It needs no cloud account and makes no AI calls. Live integrations exist for Gemini, Google Speech-to-Text, Firestore, and optional Cloud Storage, but require credentials and have not been production-validated. Gemma is an architectural target for Milestone 5, not an implemented provider.
 
-Requires Python 3.12 and Node 20.19+.
+## Architecture at a glance
+
+- `mobile/`: Expo, React Native, and TypeScript client; Android first, with a web development target.
+- `backend/app/main.py`: FastAPI routes, session authorization, and current storage coordination.
+- `backend/app/core/`: centralized startup configuration and privacy-safe structured logging.
+- `backend/app/services/`: replaceable inference and summary boundaries.
+- `backend/app/speech.py`: Google Speech-to-Text adapter for completed audio chunks.
+- `infra/gcp/`: reference Cloud Run deployment files; no deployment is implied.
+
+See [Architecture](docs/ARCHITECTURE.md), [API contracts](docs/API.md), [repository audit](docs/REPOSITORY_AUDIT.md), [observability](docs/OBSERVABILITY.md), and [security](docs/SECURITY.md).
+
+## Requirements
+
+- Python 3.12
+- Node.js 20.19 or newer in the Node 20 line
+- npm
+- An Android device/emulator for native verification (optional; web works locally)
+
+## Install
+
+From the repository root:
 
 ```bash
-python -m venv .venv
+python3.12 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt
 npm ci --prefix mobile --cache /tmp/wings-npm-cache
-.venv/bin/uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000
-# In another terminal:
-cd mobile
-EXPO_HOME=/tmp/wings-expo EXPO_NO_TELEMETRY=1 npm run web
 ```
 
-Open the Expo-provided web address. Start a conversation, tap the mic to insert the demo sample, and select **Get me unstuck**. Alternatively enter your own conversation text. Cue cards replay with device speech. Enable topic notes before starting to retain summary notes; the Personal notes view can delete the current contact's notes. End clears session fragments.
+Configuration is read from exported environment variables at process startup. The application deliberately does not auto-load `.env` files. Use `backend/.env.example` as a reference and export values through your shell or runtime; never commit a populated `.env`.
 
-The default is an explicit **demo mode**: local SQLite storage, topic-based preset cues, keyword summaries, and device speech. It makes no AI provider calls. It is not a simulation of clinical anxiety detection. Microphone transcription is only available with live providers.
+## Run the backend
 
-## Validation
+Demo mode is the default:
 
 ```bash
-.venv/bin/pytest backend -q
+APP_MODE=demo .venv/bin/uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000
+```
+
+Verify it in another terminal:
+
+```bash
+curl -i http://localhost:8000/healthz
+curl -i http://localhost:8000/readyz
+```
+
+## Run the Expo client
+
+```bash
+cd mobile
+EXPO_PUBLIC_API_URL=http://localhost:8000 EXPO_HOME=/tmp/wings-expo EXPO_NO_TELEMETRY=1 npm run web
+```
+
+For native development, run `npx expo start`. A physical device cannot reach your computer through `localhost`; set `EXPO_PUBLIC_API_URL` to a reachable HTTPS API address. No APK is included or claimed to have been published.
+
+## Demo workflow
+
+1. Enter or keep the sample contact context.
+2. Optionally enable **Remember topic notes**.
+3. Start a conversation.
+4. Use the microphone button to insert the demo transcript, or type a fragment.
+5. Select **Get me unstuck** to receive two questions and one suggestion.
+6. End the conversation to see a bounded topic summary. Active fragments are cleared; notes persist only when opted in.
+
+Demo mode does not record or transcribe microphone audio, call cloud AI, diagnose anxiety, or simulate the future four-second audio classifier.
+
+## Validate
+
+```bash
+APP_MODE=demo .venv/bin/pytest backend -q
 npm run typecheck --prefix mobile
 EXPO_HOME=/tmp/wings-expo EXPO_NO_TELEMETRY=1 npm run build --prefix mobile
-curl http://localhost:8000/readyz
 ```
 
-## Live providers and Google Cloud
+CI runs the same checks on every push and pull request without cloud credentials.
 
-Use [the Google Cloud deployment guide](infra/gcp/README.md) and `infra/gcp/deploy.sh`. The active target is Cloud Run, Firestore, and Secret Manager, with optional Cloud Storage summaries. The AWS files are retained only as historical references; do not run them with this backend.
+## Environment configuration
 
-Configure server-side environment variables from `backend/.env.example` in your runtime. Environment files are not automatically loaded. Set `APP_MODE=live`, `GEMINI_API_KEY`, and `FIRESTORE_COLLECTION=cowingman`. Google libraries use Application Default Credentials and the Cloud Run service account. Enable Firestore TTL on `expires_at` for session cleanup. Contact notes have no TTL and are kept until deleted. Optional `SUMMARY_BUCKET` enables summary-only Cloud Storage writes; failures do not block the end response. Never put keys in the mobile app.
+The complete annotated list is in `backend/.env.example`. Key groups are:
 
-The Gemini cue model defaults to `gemini-2.5-flash` (override with `GEMINI_MODEL`); this implementation does not assume Gemma supports structured output. Voice uses Gemini's preview TTS model, which must be available to your project. Transcription uses Google Cloud Speech-to-Text V2 with `chirp_3` and service-account authentication. Provider integrations are implemented but need credentials for validation. `/readyz` tests storage and provider model-list authorization in live mode; it does not guarantee inference quota.
+- Runtime/storage: `APP_MODE`, `DATABASE_PATH`, `FIRESTORE_COLLECTION`, `SUMMARY_BUCKET`.
+- Browser access: `CORS_ORIGINS` (comma-separated exact origins).
+- AI: `INFERENCE_PROVIDER`, `INFERENCE_MODEL`, `TTS_MODEL`, and server-only `GEMINI_API_KEY`.
+- Google speech: `GOOGLE_CLOUD_PROJECT`, `SPEECH_LOCATION`, `SPEECH_LANGUAGE`.
+- Pipeline planning: `AUDIO_WINDOW_SECONDS`, `SUMMARY_CHECKPOINT_SECONDS`, `MAX_AUDIO_BYTES`.
+- Telemetry: `LOG_LEVEL`, `LOG_FORMAT`, `OTEL_ENABLED`, `OTEL_SERVICE_NAME`. OpenTelemetry export is not implemented yet.
 
-Build `backend/Dockerfile` from the backend directory for a port-8000 container. Cloud Run deployment, Secret Manager injection, least-privilege IAM, alarms, Sentry, and HTTPS hosting still need provisioning. Set `CORS_ORIGINS` to your actual frontend origins. Set `EXPO_PUBLIC_API_URL` before starting or exporting the mobile app. A real device needs a reachable HTTPS backend, not localhost. Local HTTP is for loopback development only.
+Use `APP_MODE=live`, a Firestore collection, and `INFERENCE_PROVIDER=gemini` only in a configured server environment. Demo mode never requires Google credentials. `INFERENCE_PROVIDER=gemma` is a reserved future selection and currently fails closed.
 
-Session bearer tokens are random, stored hashed, expire after two hours, and are required for all session operations. Session updates use optimistic concurrency; a conflicting request receives 409 and can be retried. Per-session throttling is persisted. Session creation is public for the demo; add real user authentication and gateway abuse limits before public deployment. The client identity is a local capability, not an account login. Clear device storage and you lose access to associated notes. Persistent native identity and cloud voice playback on native remain follow-up work.
+## Troubleshooting
 
-Recent transcript context is capped to 800 characters before cue generation, with a separate background cap of 400. Crossing the window threshold triggers topic summarization; old fragments are removed. Active session fragments are stored in Firestore in live mode (not merely process memory). Audio is forwarded in memory and not saved. Provider retention policies still apply. Arrange participant awareness and consent before recording.
+- **Module `app` not found:** include `--app-dir backend` or run pytest from the repository root as shown.
+- **Expo cannot reach the API:** verify `EXPO_PUBLIC_API_URL`; use your machine’s reachable address on a physical device and configure `CORS_ORIGINS` for web.
+- **CORS failure:** list the exact frontend origin, including port, then restart the backend because settings load at startup.
+- **Live startup fails:** `APP_MODE=live` requires `FIRESTORE_COLLECTION`; provider calls additionally require credentials and permissions.
+- **Audio returns 503 in demo:** expected; use the sample transcript. Live transcription accepts completed chunks only, up to the configured byte limit.
+- **Node version error:** use Node 20.19+ and reinstall with `npm ci`.
 
-## Native builds
+## Current limitations and next milestones
 
-```bash
-cd mobile
-npx expo start
-# With an Expo/EAS account and configured project:
-npx eas-cli build --platform android --profile preview
-```
+Session tokens are local capabilities, not user accounts. Native identity is not durable, live providers need device/cloud validation, and there is no continuous streaming, clinical anxiety detection, NFC exchange, résumé ingestion, production alerting, or deployed dashboard. Operational logs are structured and omit request bodies and credentials, but full tracing/metrics arrives in Milestone 7.
 
-The preview profile requests an APK. No APK has been built or published. Native recording uses expo-av metering for pause detection where the platform supports it; manual stop remains available. Recording stops after a pause and must be restarted for the next turn. Web metering is not available consistently, so use manual stop. Native permission behavior and VAD thresholds need device testing. NFC, résumé parsing, LinkedIn enrichment, and native continuous listening are not implemented; LinkedIn is a contact identifier only. No scraping occurs.
+Milestone 2 should begin with Firebase Authentication and persistent user-profile contracts while retaining the inference, summary, storage, and telemetry seams established here. The remaining roadmap is described in [Architecture](docs/ARCHITECTURE.md).
 
-## Layout
-
-- `mobile/App.tsx`: responsive Expo app, contact setup, transcript, cues, voice, privacy and notes.
-- `backend/app/main.py`: authenticated session API, storage adapters, summaries, providers, rate limits.
-- `backend/test_app.py`: session lifecycle, isolation, context cap, note deletion, cleanup and rate limits.
-
-This is a working local MVP, not a production deployment. Live Google Cloud/provider integrations, device builds, monitoring, and load testing have not been validated.
+For deployment-specific caveats, see [Google Cloud deployment](infra/gcp/README.md).

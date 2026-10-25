@@ -3,7 +3,7 @@ import tempfile
 os.environ['DATABASE_PATH'] = tempfile.mktemp(suffix='.db')
 os.environ['APP_MODE'] = 'demo'
 from fastapi.testclient import TestClient
-from app.main import app, read
+from app.main import app, log, read
 
 client = TestClient(app)
 def start(remember=False):
@@ -47,3 +47,30 @@ def test_readiness_and_rate_limit():
     for _ in range(40):
         assert client.post(path,headers=h).status_code==409
     assert client.post(path,headers=h).status_code==429
+
+def test_request_ids_and_privacy_safe_logging(monkeypatch):
+    events = []
+    monkeypatch.setattr(log, 'info', lambda event, **kwargs: events.append((event, kwargs)))
+    secret_text = 'PRIVATE_TRANSCRIPT_SENTINEL'
+    response = client.post('/session/start', headers={'X-Request-ID':'test-request-123'}, json={
+        'name':'PRIVATE_NAME_SENTINEL',
+        'context':secret_text,
+        'owner':'test-owner-with-strong-capability-123456',
+    })
+    assert response.status_code == 200
+    assert response.headers['X-Request-ID'] == 'test-request-123'
+    serialized = repr(events)
+    assert secret_text not in serialized
+    assert 'PRIVATE_NAME_SENTINEL' not in serialized
+    assert response.json()['token'] not in serialized
+    assert events[-1][0] == 'request_completed'
+    unknown = client.get('/PRIVATE_PATH_SENTINEL')
+    assert unknown.status_code == 404
+    assert 'PRIVATE_PATH_SENTINEL' not in repr(events)
+
+def test_input_validation_limits():
+    response = client.post('/session/start', json={
+        'name':'x' * 101,
+        'owner':'test-owner-with-strong-capability-123456',
+    })
+    assert response.status_code == 422
