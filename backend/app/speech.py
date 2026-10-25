@@ -1,0 +1,23 @@
+import os
+from google.api_core.client_options import ClientOptions
+from google.cloud import speech_v2
+from google.cloud.speech_v2.types import cloud_speech
+
+
+async def transcribe(data: bytes) -> str:
+    project = os.environ['GOOGLE_CLOUD_PROJECT']
+    location = os.getenv('SPEECH_LOCATION', 'us')
+    client = speech_v2.SpeechAsyncClient(client_options=ClientOptions(api_endpoint=f'{location}-speech.googleapis.com'))
+    try:
+        result = await client.recognize(request=cloud_speech.RecognizeRequest(
+            recognizer=f'projects/{project}/locations/{location}/recognizers/_',
+            config=cloud_speech.RecognitionConfig(
+                auto_decoding_config=cloud_speech.AutoDetectDecodingConfig(),
+                language_codes=[os.getenv('SPEECH_LANGUAGE', 'en-US')],
+                model='chirp_3',
+            ),
+            content=data,
+        ), timeout=30)
+        return ' '.join(r.alternatives[0].transcript for r in result.results if r.alternatives).strip()
+    finally:
+        await client.transport.close()
