@@ -41,6 +41,7 @@ class Settings:
     summary_bucket: str | None
     speech_location: str
     speech_language: str
+    speech_model: str
     audio_window_seconds: float
     summary_checkpoint_seconds: int
     max_audio_bytes: int
@@ -84,6 +85,7 @@ def load_settings() -> Settings:
         summary_bucket=os.getenv("SUMMARY_BUCKET"),
         speech_location=os.getenv("SPEECH_LOCATION", "us"),
         speech_language=os.getenv("SPEECH_LANGUAGE", "en-US"),
+        speech_model=os.getenv("SPEECH_MODEL", "long"),
         audio_window_seconds=float(os.getenv("AUDIO_WINDOW_SECONDS", "4")),
         summary_checkpoint_seconds=int(os.getenv("SUMMARY_CHECKPOINT_SECONDS", "120")),
         max_audio_bytes=int(os.getenv("MAX_AUDIO_BYTES", str(8 * 1024 * 1024))),

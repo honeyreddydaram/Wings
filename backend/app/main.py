@@ -547,9 +547,14 @@ async def audio(
     cached = state.get('audio_chunks', {}).get(str(chunk_index))
     if cached:
         return dict(cached, duplicate=True)
-    allowed_types = {'audio/m4a','audio/mp4','audio/x-m4a','audio/webm','application/octet-stream'}
-    if file.content_type and file.content_type not in allowed_types:
-        raise HTTPException(415,'Unsupported audio type. Send M4A or WebM audio.')
+    content_type = (file.content_type or '').lower().split(';')[0].strip()
+    allowed_types = {
+        'audio/m4a', 'audio/mp4', 'audio/x-m4a', 'audio/webm', 'video/webm',
+        'audio/aac', 'audio/x-aac', 'audio/wav', 'audio/x-wav', 'audio/ogg',
+        'audio/opus', 'audio/3gpp', 'audio/mpeg', 'audio/mp3', 'application/octet-stream'
+    }
+    if content_type and not (content_type.startswith('audio/') or content_type in allowed_types):
+        raise HTTPException(415, 'Unsupported audio type. Send M4A, WebM, or WAV audio.')
     data = await file.read(settings.max_audio_bytes+1)
     if len(data)>settings.max_audio_bytes:
         raise HTTPException(413,'Audio chunk exceeds 8 MB')
@@ -559,7 +564,7 @@ async def audio(
         try:
             with observe(
                 'speech.recognize', component='speech', operation='recognize', provider='google',
-                **{'audio.format': (file.content_type or 'unknown').split('/')[-1], 'audio.size_bucket': 'small' if len(data) < 1_000_000 else 'large'},
+                **{'audio.format': (content_type or 'unknown').split('/')[-1], 'audio.size_bucket': 'small' if len(data) < 1_000_000 else 'large'},
             ):
                 text = await transcribe(data)
         except Exception:

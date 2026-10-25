@@ -188,8 +188,8 @@ export default function App() {
     follow_up?: string;
     saved: boolean;
   } | null>(null);
-  const [recordingConsent, setRecordingConsent] = useState(false);
-  const [autoAssist, setAutoAssist] = useState(false);
+  const [recordingConsent, setRecordingConsent] = useState(true);
+  const [autoAssist, setAutoAssist] = useState(true);
   const [assistantSpeaking, setAssistantSpeaking] = useState(false);
   const [difficulty, setDifficulty] = useState<DifficultySnapshot>({
     level: "low",
@@ -218,6 +218,8 @@ export default function App() {
   const autoAssistRef = useRef(false);
   const assistantSpeakingRef = useRef(false);
   const busyRef = useRef(false);
+  const cuesRef = useRef<Cue[]>([]);
+  cuesRef.current = cues;
   const automaticRequestPending = useRef(false);
   const recoveryAttemptedFor = useRef("");
   const performanceTracker = useRef(new PerformanceTracker());
@@ -708,7 +710,14 @@ export default function App() {
     form.append("chunk_index", String(chunkIndex));
     form.append("captured_at_ms", String(capturedAtMs));
     if (Platform.OS === "web") {
-      form.append("file", await (await fetch(uri)).blob(), "chunk.webm");
+      const blob = await (await fetch(uri)).blob();
+      const ext =
+        blob.type.includes("mp4") ||
+        blob.type.includes("aac") ||
+        blob.type.includes("m4a")
+          ? "m4a"
+          : "webm";
+      form.append("file", blob, `chunk.${ext}`);
     } else {
       form.append("file", { uri, name: "chunk.m4a", type: "audio/m4a" } as any);
     }
@@ -756,6 +765,11 @@ export default function App() {
     setPerformance(performanceTracker.current.snapshot());
     difficultyDetector.current.observeTranscript(result.text, capturedAtMs);
     setTranscript((t) => (t + " " + result.text).slice(-2000));
+    if (result.text && result.text.trim()) {
+      if (!cuesRef.current.length && !automaticRequestPending.current) {
+        void getCues(true);
+      }
+    }
     setSignal(result.signal);
   }
   async function mic() {

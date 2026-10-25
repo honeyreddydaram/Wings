@@ -14,6 +14,7 @@ def test_google_request_and_client_cleanup(monkeypatch):
         assert asyncio.run(transcribe(b'audio')) == 'Hello there'
     request = client.recognize.call_args.kwargs['request']
     assert request.recognizer == 'projects/test-project/locations/us/recognizers/_'
-    assert request.config.model == 'chirp_3'
+    assert request.config.model == 'long'
+    assert request.config.features.enable_automatic_punctuation is True
     assert request.content == b'audio'
     client.transport.close.assert_awaited_once()

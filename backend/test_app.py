@@ -147,10 +147,19 @@ def test_ordered_audio_chunks_are_idempotent(monkeypatch):
     transcribe.assert_awaited_once()
     assert read('session:'+session['id'])['fragments'] == ['A short incremental transcript.']
 
+    # Web browsers send audio/webm;codecs=opus or similar content types with parameters
+    webm_codec = client.post(
+        path,
+        headers=headers,
+        data={'chunk_index':'8', 'captured_at_ms':'123457'},
+        files={'file':('chunk.webm', b'encoded-audio-webm', 'audio/webm;codecs=opus')},
+    )
+    assert webm_codec.status_code == 200
+
     unsupported = client.post(
         path,
         headers=headers,
-        data={'chunk_index':'8'},
+        data={'chunk_index':'9'},
         files={'file':('chunk.txt', b'not-audio', 'text/plain')},
     )
     assert unsupported.status_code == 415
