@@ -98,15 +98,15 @@ The server retains results for the latest 32 chunk indexes in session state. Ret
 
 ### `POST /session/{sid}/cue`
 
-Generates two questions and one suggestion from bounded context. Requires bearer token; request body is empty.
+Generates two to four bounded cues from recent conversation first, plus limited opted-in background. Categories are `question`, `transition`, `talking_point`, and `experience`. Requires bearer token; request body is empty.
 
 Response `200`:
 
 ```json
-{"cues":[{"category":"question","text":"...","id":"uuid"}],"signal":"low","demo":true}
+{"cues":[{"category":"question","text":"...","id":"uuid"}],"signal":"low","fallback":false}
 ```
 
-The implementation returns three cues. Errors: `409` no conversation context; `502` live provider unavailable; common session errors.
+The implementation normally returns three cues. Malformed, unsafe, or unavailable provider output returns deterministic cues with `fallback: true`. Errors: `409` no conversation context and common session errors.
 
 ### `POST /session/{sid}/cue/{cid}/speak`
 
@@ -129,11 +129,11 @@ Creates the final bounded summary, optionally updates contact notes, clears acti
 Response `200`:
 
 ```json
-{"summary":"Topics discussed: ...","saved":false}
+{"summary":"Topics discussed: ...","follow_up":"It was great talking...","saved":false}
 ```
 
-Optional Cloud Storage failure does not fail the response. Provider summary failure in live mode can return `503`/provider-derived failure; common session errors also apply. Further session calls return `410`.
+Optional Cloud Storage failure does not fail the response. Provider summary failure uses a bounded deterministic summary and follow-up. Common session errors still apply. Further session calls return `410`.
 
 ## Future proposals (not implemented)
 
-M3 may add streaming transport; M6 may add card/QR/vCard endpoints. These are intentionally excluded from the current contract until implemented.
+M6 may add card/QR/vCard endpoints. These are intentionally excluded from the current contract until implemented.

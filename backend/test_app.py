@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 from dataclasses import replace
@@ -25,10 +26,11 @@ def test_full_conversation_and_cleanup():
     assert r.status_code==200
     r=client.post(path+'/cue',headers=h)
     assert r.status_code==200
-    assert [c['category'] for c in r.json()['cues']]==['question','question','suggestion']
+    assert [c['category'] for c in r.json()['cues']]==['question','transition','experience']
     assert 'users' in r.json()['cues'][0]['text']
     end=client.post(path+'/end',headers=h)
     assert end.status_code==200 and end.json()['saved']
+    assert len(end.json()['follow_up']) <= 280
     state=read('session:'+s['id'])
     assert state['fragments']==[] and state['summary']==''
     assert client.post(path+'/cue',headers=h).status_code==410
@@ -152,3 +154,45 @@ def test_ordered_audio_chunks_are_idempotent(monkeypatch):
         files={'file':('chunk.txt', b'not-audio', 'text/plain')},
     )
     assert unsupported.status_code == 415
+
+
+def test_summary_checkpoint_preserves_newer_fragments():
+    session, _ = start()
+    key = 'session:'+session['id']
+    state = read(key)
+    state['checkpoint_seq'] = 1
+    state['fragments'] = ['claimed fragment', 'newer fragment']
+    main_module.write(key, state)
+    asyncio.run(main_module.run_summary_checkpoint(session['id'], 1, 1, 'claimed fragment'))
+    updated = read(key)
+    assert updated['fragments'] == ['newer fragment']
+    assert 'claimed' in updated['summary']
+
+
+def test_live_cues_use_bounded_profile_context_and_fallback(monkeypatch):
+    owner = 'profile-cue-owner-1234567890'
+    client.put('/profile/me', headers={'X-Demo-Owner':owner}, json={
+        'headline':'Accessibility engineer',
+        'skills':['Python','Research'],
+        'resume_summary':'PRIVATE_FULL_RESUME_SHOULD_NOT_BE_SENT',
+    })
+    response = client.post('/session/start', json={'name':'Recruiter','owner':owner})
+    session = response.json()
+    headers = {'Authorization':'Bearer '+session['token']}
+    client.post(f"/session/{session['id']}/transcript", headers=headers, json={
+        'text':'We discussed the engineering team and accessible products.'
+    })
+    provider = AsyncMock(return_value='{"cues":[{"category":"question","text":"What accessibility challenge is the team exploring?"},{"category":"transition","text":"That connects well to the product work you mentioned."},{"category":"experience","text":"If useful, briefly mention your accessibility engineering experience."}]}')
+    monkeypatch.setattr(main_module, 'MODE', 'live')
+    monkeypatch.setattr(main_module, 'generate_text', provider)
+    generated = client.post(f"/session/{session['id']}/cue", headers=headers)
+    assert generated.status_code == 200
+    assert generated.json()['fallback'] is False
+    prompt = provider.await_args.args[1]
+    assert 'Accessibility engineer' in prompt
+    assert 'PRIVATE_FULL_RESUME_SHOULD_NOT_BE_SENT' not in prompt
+
+    provider.return_value = '{bad json'
+    fallback = client.post(f"/session/{session['id']}/cue", headers=headers)
+    assert fallback.status_code == 200
+    assert fallback.json()['fallback'] is True

@@ -104,6 +104,7 @@ export default function App() {
   const [signal, setSignal] = useState("low");
   const [ended, setEnded] = useState<{
     summary: string;
+    follow_up?: string;
     saved: boolean;
   } | null>(null);
   const [recordingConsent, setRecordingConsent] = useState(false);
@@ -1057,6 +1058,12 @@ export default function App() {
                     <View style={{ gap: 18, paddingTop: 24 }}>
                       <Text style={s.serif}>A connection worth keeping.</Text>
                       <Text style={s.body}>{ended.summary}</Text>
+                      {!!ended.follow_up && (
+                        <View style={s.transcriptBox}>
+                          <Text style={s.label}>OPTIONAL FOLLOW-UP DRAFT</Text>
+                          <Text style={s.transcript}>{ended.follow_up}</Text>
+                        </View>
+                      )}
                       <Text style={s.small}>
                         {ended.saved
                           ? "Topic notes saved for next time."
@@ -1332,7 +1339,11 @@ export default function App() {
                               >
                                 {cue.category === "question"
                                   ? "A QUESTION TO ASK"
-                                  : "SOMETHING TO TRY"}
+                                  : cue.category === "transition"
+                                    ? "A NATURAL TRANSITION"
+                                    : cue.category === "experience"
+                                      ? "AN EXPERIENCE TO SHARE"
+                                      : "A TALKING POINT"}
                               </Text>
                             </View>
                             <Icon

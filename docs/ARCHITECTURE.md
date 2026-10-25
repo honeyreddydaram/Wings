@@ -11,11 +11,11 @@ flowchart TB
     A[Android application<br/>Implemented: Expo UI, rolling chunk capture, device voice<br/>Simulated: demo transcript input] -->|HTTPS REST + bearer capability| B[FastAPI backend<br/>Implemented]
     B --> C[Authentication<br/>Implemented: Firebase ID-token verification<br/>Implemented: per-session bearer capability]
     B --> D[Session management<br/>Implemented: lifecycle, expiry, rate count]
-    B --> E[Audio processing interface<br/>Implemented M3: ordered bounded chunks<br/>Planned M4: local derived-feature windows]
+    B --> E[Audio processing interface<br/>Implemented M3: ordered bounded chunks<br/>Implemented M4: local derived-feature windows]
     B --> F[Transcription interface<br/>Implemented M3: incremental Google STT chunks<br/>Unverified against deployed credentials]
-    B --> G[Assistance detection<br/>Simulated: text hesitation heuristic<br/>Planned M4: conservative audio signal]
-    B --> H[AI inference interface<br/>Implemented: demo/Gemini seam<br/>Planned M5: Gemma adapter]
-    B --> I[Summarization<br/>Implemented: size-triggered bounded summaries<br/>Planned: timed checkpoints]
+    B --> G[Assistance detection<br/>Implemented M4: conservative local derived signal]
+    B --> H[AI inference interface<br/>Implemented M5: demo, Gemini, and Vertex AI Gemma adapters]
+    B --> I[Summarization<br/>Implemented: bounded and timed checkpoints]
     B --> J[Contact/profile storage<br/>Implemented: authenticated profiles + opt-in notes<br/>Planned M6: cards and exchange]
     B --> K[Observability<br/>Implemented: JSON request logs + request IDs<br/>Planned M7: metrics/traces/alerts]
     D & F & H & I & J & K --> L[Google Cloud services<br/>Adapters/reference deployment only]
@@ -32,7 +32,7 @@ With Firebase configured, the Expo client persists its Firebase sign-in, sends a
 
 In live mode, M3 gates microphone capture on participant-awareness confirmation and permission, then records ordered four-second M4A/WebM files. Uploads are serialized while capture rolls forward; successful transcripts enter the same bounded-context path as typed fragments. Chunk indexes make accepted retries idempotent. Device speech reads cues on Android and web without exposing a session capability in an audio URL.
 
-The FastAPI application hashes session tokens before persistence, enforces a two-hour session expiry and per-session request count, and stores state through SQLite in demo mode or Firestore when configured. Active context consists of a bounded summary plus recent fragments. Cue generation uses deterministic demo rules by default or the current Gemini adapter in live mode. The `INFERENCE_PROVIDER` boundary reserves a distinct Gemma adapter; selecting Gemma currently fails closed because changing only a model name would not be a valid integration.
+The FastAPI application hashes session tokens before persistence, enforces a two-hour session expiry and per-session request count, and stores state through SQLite in demo mode or Firestore when configured. Active context consists of a bounded summary plus recent fragments. Cue generation uses deterministic demo rules by default or the provider-specific Vertex AI Gemma adapter in live mode. Gemini remains a distinct compatibility adapter. Invalid or unavailable provider output falls back to deterministic bounded cues.
 
 The backend remains one deployable service. This is intentional for a hackathon: internal module boundaries allow replacement without adding network hops, distributed transactions, or additional operations work.
 
@@ -44,9 +44,9 @@ The backend remains one deployable service. This is intentional for a hackathon:
 | Identity | Firebase Authentication when configured; persistent demo device capability locally; separate session token | OAuth providers, account deletion, and stronger device secret storage |
 | Session storage | SQLite or Firestore record adapter in `main.py` | Extract a repository when profile/session schemas evolve |
 | Transcription | Ordered near-real-time chunks to Google Speech-to-Text V2 | Physical-device validation; optional native raw stream later |
-| Assistance signal | Transcript hesitation and caller-provided pause count | Local, non-clinical audio feature pipeline in M4 |
-| Inference | Deterministic demo cues or Gemini JSON response | Provider-specific Gemma implementation in M5 |
-| Summary | Keyword summary in demo; provider summary in live mode | Timed checkpoints and final summary orchestration |
+| Assistance signal | Local bounded metering/transcript-derived score plus manual help | Physical-device calibration and venue evaluation |
+| Inference | Deterministic fallback, Gemini compatibility, or Vertex AI Gemma | Live quality, quota, latency, and cost validation |
+| Summary | Keyword/provider summary, independent timed checkpoints, final summary and follow-up | Deployed concurrency and quality validation |
 | Contact/profile data | UID-isolated professional profile, hashed contact lookup, opt-in topic summary | Cards, QR and compatible NFC in M6 |
 | Telemetry | JSON request completion/failure events | OpenTelemetry metrics/traces and cloud dashboards in M7 |
 

@@ -30,6 +30,11 @@ class Settings:
     inference_provider: str
     gemini_api_key: str | None
     inference_model: str
+    gemma_model: str
+    gemma_location: str
+    gemma_base_url: str | None
+    inference_timeout_seconds: float
+    inference_max_retries: int
     tts_model: str
     summary_bucket: str | None
     speech_location: str
@@ -58,6 +63,11 @@ def load_settings() -> Settings:
         inference_provider=provider,
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         inference_model=os.getenv("INFERENCE_MODEL", os.getenv("GEMINI_MODEL", "gemini-2.5-flash")),
+        gemma_model=os.getenv("GEMMA_MODEL", "google/gemma-3-27b-it"),
+        gemma_location=os.getenv("GEMMA_LOCATION", "global"),
+        gemma_base_url=os.getenv("GEMMA_BASE_URL"),
+        inference_timeout_seconds=float(os.getenv("INFERENCE_TIMEOUT_SECONDS", "20")),
+        inference_max_retries=int(os.getenv("INFERENCE_MAX_RETRIES", "2")),
         tts_model=os.getenv("TTS_MODEL", "gemini-2.5-flash-preview-tts"),
         summary_bucket=os.getenv("SUMMARY_BUCKET"),
         speech_location=os.getenv("SPEECH_LOCATION", "us"),
@@ -80,6 +90,12 @@ def load_settings() -> Settings:
         raise RuntimeError("Firebase auth mode requires FIREBASE_PROJECT_ID or GOOGLE_CLOUD_PROJECT")
     if settings.inference_provider not in {"demo", "gemini", "gemma"}:
         raise RuntimeError("INFERENCE_PROVIDER must be demo, gemini, or gemma")
+    if settings.inference_provider == "gemma" and not settings.google_cloud_project:
+        raise RuntimeError("Gemma requires GOOGLE_CLOUD_PROJECT")
+    if not 1 <= settings.inference_timeout_seconds <= 60:
+        raise RuntimeError("INFERENCE_TIMEOUT_SECONDS must be between 1 and 60")
+    if not 0 <= settings.inference_max_retries <= 3:
+        raise RuntimeError("INFERENCE_MAX_RETRIES must be between 0 and 3")
     return settings
 
 

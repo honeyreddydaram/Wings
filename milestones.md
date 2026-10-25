@@ -238,7 +238,7 @@ Reference: [Milestone 4 details](docs/MILESTONE_4.md).
 
 ## Milestone 5 — Gemma Conversation Intelligence
 
-**Status: Pending**
+**Status: Complete locally; live Vertex AI and quality/performance evaluation pending**
 
 ### Objective
 
@@ -246,44 +246,46 @@ Integrate Gemma through a real provider-specific adapter and generate brief, saf
 
 ### Provider integration
 
-- [ ] Select and document the supported Gemma model, hosting product, region, authentication method, quotas, and cost assumptions.
-- [ ] Implement a Gemma adapter behind the existing inference interface.
-- [ ] Do not reuse the Gemini REST contract or assume that changing a model name is sufficient.
-- [ ] Add provider timeouts, bounded retries, circuit breaking, and a graceful text fallback.
-- [ ] Validate structured JSON output against schemas before returning cues.
-- [ ] Add contract tests using mocked provider responses and malformed-output cases.
+- [x] Select and document Gemma 3 27B IT through Vertex AI Model Garden's OpenAI-compatible endpoint, global location, and Application Default Credentials; deployed quota and pricing remain external checks.
+- [x] Implement a Gemma adapter behind the existing inference interface.
+- [x] Keep Gemma's provider-specific request and authentication contract separate from Gemini.
+- [x] Add provider timeouts, bounded retries, circuit breaking, and a deterministic text fallback.
+- [x] Validate structured JSON output against schemas and safety rules before returning cues.
+- [x] Add contract tests using mocked provider responses and malformed-output cases.
 
 ### Context construction
 
-- [ ] Build a bounded context assembler using recent conversation, rolling summary, authenticated profile, opt-in contact notes, and current assistance signal.
-- [ ] Weight recent conversation above background profile information.
-- [ ] Never send the full profile, résumé, transcript, or contact history when a smaller relevant subset is sufficient.
-- [ ] Treat all transcript/profile/contact text as untrusted data and defend against prompt injection.
-- [ ] Keep public-information retrieval permission-based and separately attributable.
+- [x] Build a bounded context assembler using recent conversation, rolling summary, authenticated profile, opt-in contact notes, and current assistance signal.
+- [x] Weight recent conversation above background profile information.
+- [x] Exclude full profiles, résumé summaries, full transcripts, and contact histories; include only capped relevant fields.
+- [x] Treat all transcript/profile/contact text as escaped untrusted data and reinforce that boundary in the provider system message.
+- [x] Keep public-information retrieval disabled; no background retrieval or unattributed enrichment occurs.
 
 ### Cue generation
 
-- [ ] Generate short follow-up questions, natural transitions, talking points, and optional experience-introduction suggestions.
-- [ ] Keep suggestions socially appropriate, low pressure, and easy to ignore.
-- [ ] Support explicit help requests independently from automatic M4 triggers.
-- [ ] Avoid sensitive-trait inference, manipulation, impersonation, clinical claims, and invented personal facts.
-- [ ] Enforce length, category, count, and safety validation.
+- [x] Generate short follow-up questions, natural transitions, talking points, and optional experience-introduction suggestions.
+- [x] Keep suggestions socially appropriate, low pressure, and easy to ignore.
+- [x] Support explicit help requests independently from automatic M4 triggers.
+- [x] Avoid sensitive-trait inference, manipulation, impersonation, clinical claims, and invented personal facts through prompts and output validation.
+- [x] Enforce length, category, count, duplicate, schema, and safety validation.
 
 ### Summaries and follow-up
 
-- [ ] Implement independent approximately two-minute summary checkpoints.
-- [ ] Ensure checkpoint work never blocks urgent cue requests.
-- [ ] Make checkpoints idempotent and safe under retry/concurrent updates.
-- [ ] Generate a bounded final summary and optional follow-up message draft.
-- [ ] Persist contact notes only after explicit opt-in.
+- [x] Implement independent approximately two-minute summary checkpoints.
+- [x] Run checkpoint work in a separate task so it does not block urgent cue requests.
+- [x] Use checkpoint sequence claims and prefix-only folding to tolerate retry and concurrent newer fragments.
+- [x] Generate a bounded final summary and optional follow-up message draft.
+- [x] Persist contact notes only after explicit opt-in.
 
 ### Evaluation and exit criteria
 
-- [ ] Create a curated scenario set for networking, recruiting, student, and social conversations.
+- [x] Create a curated scenario set for networking, recruiting, student, and social conversations.
 - [ ] Measure relevance, hallucination rate, latency, verbosity, safety, and profile-grounding accuracy.
-- [ ] Compare Gemma results against the deterministic fallback.
+- [x] Contract-test both provider-shaped output and the deterministic fallback across curated scenarios; comparative quality scoring remains pending.
 - [ ] Validate deployed quotas, cold starts, concurrency, and cost.
-- [ ] Demonstrate that cues use recent context and do not leak unrelated profile information.
+- [x] Demonstrate in tests that cues receive recent context and selected profile fields without the résumé summary or unrelated profile data.
+
+Reference: [Milestone 5 details](docs/MILESTONE_5.md).
 
 ---
 

@@ -1,8 +1,8 @@
 # Co-Wingman (Wings)
 
-Co-Wingman is an Android-first conversation assistant that offers short questions and gentle suggestions while keeping the person—not the assistant—at the center. This repository is a working local MVP with Milestones 1–4 implemented for the Gator Hacks project.
+Co-Wingman is an Android-first conversation assistant that offers short questions and gentle suggestions while keeping the person—not the assistant—at the center. This repository is a working local MVP with Milestones 1–5 implemented for the Gator Hacks project.
 
-The default configuration is an explicit demo: SQLite storage, preset topic-based cues, keyword summaries, and device speech. It needs no cloud account and makes no AI calls. Live integrations exist for Gemini, Google Speech-to-Text, Firestore, and optional Cloud Storage, but require credentials and have not been production-validated. Gemma is an architectural target for Milestone 5, not an implemented provider.
+The default configuration is an explicit demo: SQLite storage, preset topic-based cues, keyword summaries, and device speech. It needs no cloud account and makes no AI calls. Live integrations exist for Vertex AI Gemma, Gemini compatibility, Google Speech-to-Text, Firestore, and optional Cloud Storage, but require credentials and have not been production-validated.
 
 ## Architecture at a glance
 
@@ -10,12 +10,13 @@ The default configuration is an explicit demo: SQLite storage, preset topic-base
 - `backend/app/main.py`: FastAPI routes, session authorization, and current storage coordination.
 - `backend/app/core/`: centralized configuration, Firebase/demo authentication, and privacy-safe structured logging.
 - `backend/app/services/`: replaceable inference and summary boundaries.
+- `backend/app/services/context.py`: priority-ordered, hard-capped prompt context.
 - `mobile/src/audioPipeline.ts`: consented rolling capture, ordered upload queue, and pause/resume lifecycle.
 - `mobile/src/difficultyDetector.ts`: local derived-signal scoring and conservative automatic-intervention policy.
 - `backend/app/speech.py`: Google Speech-to-Text adapter for short completed audio chunks.
 - `infra/gcp/`: reference Cloud Run deployment files; no deployment is implied.
 
-See [Architecture](docs/ARCHITECTURE.md), [API contracts](docs/API.md), [Milestone 2 scope](docs/MILESTONE_2.md), [Milestone 3 scope](docs/MILESTONE_3.md), [Milestone 4 scope](docs/MILESTONE_4.md), [repository audit](docs/REPOSITORY_AUDIT.md), [observability](docs/OBSERVABILITY.md), and [security](docs/SECURITY.md).
+See [Architecture](docs/ARCHITECTURE.md), [API contracts](docs/API.md), [Milestone 2 scope](docs/MILESTONE_2.md), [Milestone 3 scope](docs/MILESTONE_3.md), [Milestone 4 scope](docs/MILESTONE_4.md), [Milestone 5 scope](docs/MILESTONE_5.md), [repository audit](docs/REPOSITORY_AUDIT.md), [observability](docs/OBSERVABILITY.md), and [security](docs/SECURITY.md).
 
 ## Requirements
 
@@ -112,13 +113,13 @@ The complete annotated list is in `backend/.env.example`. Key groups are:
 - Runtime/storage: `APP_MODE`, `DATABASE_PATH`, `FIRESTORE_COLLECTION`, `SUMMARY_BUCKET`.
 - Identity: `AUTH_MODE`, `FIREBASE_PROJECT_ID`, and optional `FIREBASE_CHECK_REVOKED`.
 - Browser access: `CORS_ORIGINS` (comma-separated exact origins).
-- AI: `INFERENCE_PROVIDER`, `INFERENCE_MODEL`, `TTS_MODEL`, and server-only `GEMINI_API_KEY`.
+- AI: `INFERENCE_PROVIDER`, `GEMMA_MODEL`, `GEMMA_LOCATION`, optional `GEMMA_BASE_URL`, retry/timeout settings, and Gemini compatibility settings.
 - Google speech: `GOOGLE_CLOUD_PROJECT`, `SPEECH_LOCATION`, `SPEECH_LANGUAGE`.
 - Audio pipeline: backend `AUDIO_WINDOW_SECONDS`/`MAX_AUDIO_BYTES` and client `EXPO_PUBLIC_AUDIO_CHUNK_SECONDS`; keep the chunk duration aligned.
-- Pipeline planning: `SUMMARY_CHECKPOINT_SECONDS` remains reserved for timed summaries.
+- Summary pipeline: `SUMMARY_CHECKPOINT_SECONDS` controls independent checkpoint scheduling.
 - Telemetry: `LOG_LEVEL`, `LOG_FORMAT`, `OTEL_ENABLED`, `OTEL_SERVICE_NAME`. OpenTelemetry export is not implemented yet.
 
-Use `APP_MODE=live`, a Firestore collection, and `INFERENCE_PROVIDER=gemini` only in a configured server environment. Demo mode never requires Google credentials. `INFERENCE_PROVIDER=gemma` is a reserved future selection and currently fails closed.
+Use `APP_MODE=live`, a Firestore collection, and `INFERENCE_PROVIDER=gemma` only in a configured server environment with Vertex AI access. Demo mode never requires Google credentials. Gemini remains a separate compatibility adapter.
 
 ## Troubleshooting
 
@@ -133,8 +134,8 @@ Use `APP_MODE=live`, a Firestore collection, and `INFERENCE_PROVIDER=gemini` onl
 
 ## Current limitations and next milestones
 
-Firebase authentication, profiles, and the M3 rolling-audio path are implemented but still need validation against a real Firebase/Google Cloud project and physical Android device. Session capability tokens remain in memory, and there is no raw PCM streaming, clinical anxiety detection, NFC exchange, résumé-file ingestion, production alerting, or deployed dashboard. Operational logs are structured and omit request bodies and credentials, but full tracing/metrics arrives in Milestone 7.
+Firebase authentication, profiles, rolling audio, local assistance detection, and Gemma integration are implemented locally but still need validation against a real Firebase/Google Cloud project and physical Android device. Session capability tokens remain in memory, and there is no raw PCM streaming, clinical anxiety detection, NFC exchange, résumé-file ingestion, production alerting, or deployed dashboard. Operational logs are structured and omit request bodies and credentials, but full tracing/metrics arrives in Milestone 7.
 
-Milestone 4 should add conservative, on-device derived audio features and intervention cooldowns without changing the M3 capture/transcript boundary. The remaining roadmap is described in [Architecture](docs/ARCHITECTURE.md).
+Milestone 6 is next: controlled digital cards and contact exchange. The remaining roadmap is described in [Architecture](docs/ARCHITECTURE.md).
 
 For deployment-specific caveats, see [Google Cloud deployment](infra/gcp/README.md).
