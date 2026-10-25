@@ -16,7 +16,7 @@ flowchart TB
     B --> G[Assistance detection<br/>Implemented M4: conservative local derived signal]
     B --> H[AI inference interface<br/>Implemented M5: demo, Gemini, and Vertex AI Gemma adapters]
     B --> I[Summarization<br/>Implemented: bounded and timed checkpoints]
-    B --> J[Contact/profile storage<br/>Implemented: authenticated profiles + opt-in notes<br/>Planned M6: cards and exchange]
+    B --> J[Contact/profile storage<br/>Implemented: profiles, public cards, exchanged contacts, opt-in notes]
     B --> K[Observability<br/>Implemented: JSON request logs + request IDs<br/>Planned M7: metrics/traces/alerts]
     D & F & H & I & J & K --> L[Google Cloud services<br/>Adapters/reference deployment only]
     L --> L1[Cloud Run]
@@ -47,7 +47,7 @@ The backend remains one deployable service. This is intentional for a hackathon:
 | Assistance signal | Local bounded metering/transcript-derived score plus manual help | Physical-device calibration and venue evaluation |
 | Inference | Deterministic fallback, Gemini compatibility, or Vertex AI Gemma | Live quality, quota, latency, and cost validation |
 | Summary | Keyword/provider summary, independent timed checkpoints, final summary and follow-up | Deployed concurrency and quality validation |
-| Contact/profile data | UID-isolated professional profile, hashed contact lookup, opt-in topic summary | Cards, QR and compatible NFC in M6 |
+| Contact/profile data | UID-isolated professional profile and contact snapshots; separate visibility-controlled public cards; opt-in topic summary | Firestore subcollections if document-size or write-contention measurements require them |
 | Telemetry | JSON request completion/failure events | OpenTelemetry metrics/traces and cloud dashboards in M7 |
 
 ## Future real-time pipeline

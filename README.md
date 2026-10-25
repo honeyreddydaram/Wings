@@ -1,6 +1,6 @@
 # Co-Wingman (Wings)
 
-Co-Wingman is an Android-first conversation assistant that offers short questions and gentle suggestions while keeping the person—not the assistant—at the center. This repository is a working local MVP with Milestones 1–5 implemented for the Gator Hacks project.
+Co-Wingman is an Android-first conversation assistant that offers short questions and gentle suggestions while keeping the person—not the assistant—at the center. This repository is a working local MVP with Milestones 1–6 implemented for the Gator Hacks project.
 
 The default configuration is an explicit demo: SQLite storage, preset topic-based cues, keyword summaries, and device speech. It needs no cloud account and makes no AI calls. Live integrations exist for Vertex AI Gemma, Gemini compatibility, Google Speech-to-Text, Firestore, and optional Cloud Storage, but require credentials and have not been production-validated.
 
@@ -16,7 +16,7 @@ The default configuration is an explicit demo: SQLite storage, preset topic-base
 - `backend/app/speech.py`: Google Speech-to-Text adapter for short completed audio chunks.
 - `infra/gcp/`: reference Cloud Run deployment files; no deployment is implied.
 
-See [Architecture](docs/ARCHITECTURE.md), [API contracts](docs/API.md), [Milestone 2 scope](docs/MILESTONE_2.md), [Milestone 3 scope](docs/MILESTONE_3.md), [Milestone 4 scope](docs/MILESTONE_4.md), [Milestone 5 scope](docs/MILESTONE_5.md), [repository audit](docs/REPOSITORY_AUDIT.md), [observability](docs/OBSERVABILITY.md), and [security](docs/SECURITY.md).
+See [Architecture](docs/ARCHITECTURE.md), [API contracts](docs/API.md), [Milestone 2 scope](docs/MILESTONE_2.md), [Milestone 3 scope](docs/MILESTONE_3.md), [Milestone 4 scope](docs/MILESTONE_4.md), [Milestone 5 scope](docs/MILESTONE_5.md), [Milestone 6 scope](docs/MILESTONE_6.md), [repository audit](docs/REPOSITORY_AUDIT.md), [observability](docs/OBSERVABILITY.md), and [security](docs/SECURITY.md).
 
 ## Requirements
 
@@ -111,6 +111,7 @@ CI runs the same checks on every push and pull request without cloud credentials
 The complete annotated list is in `backend/.env.example`. Key groups are:
 
 - Runtime/storage: `APP_MODE`, `DATABASE_PATH`, `FIRESTORE_COLLECTION`, `SUMMARY_BUCKET`.
+- Public identity: `PUBLIC_BASE_URL` must be the externally reachable API origin used in card links and QR codes.
 - Identity: `AUTH_MODE`, `FIREBASE_PROJECT_ID`, and optional `FIREBASE_CHECK_REVOKED`.
 - Browser access: `CORS_ORIGINS` (comma-separated exact origins).
 - AI: `INFERENCE_PROVIDER`, `GEMMA_MODEL`, `GEMMA_LOCATION`, optional `GEMMA_BASE_URL`, retry/timeout settings, and Gemini compatibility settings.
@@ -134,8 +135,8 @@ Use `APP_MODE=live`, a Firestore collection, and `INFERENCE_PROVIDER=gemma` only
 
 ## Current limitations and next milestones
 
-Firebase authentication, profiles, rolling audio, local assistance detection, and Gemma integration are implemented locally but still need validation against a real Firebase/Google Cloud project and physical Android device. Session capability tokens remain in memory, and there is no raw PCM streaming, clinical anxiety detection, NFC exchange, résumé-file ingestion, production alerting, or deployed dashboard. Operational logs are structured and omit request bodies and credentials, but full tracing/metrics arrives in Milestone 7.
+Firebase authentication, profiles, rolling audio, local assistance detection, Gemma integration, and controlled card/contact exchange are implemented locally but still need validation against a real Firebase/Google Cloud project and physical Android device. Session capability tokens remain in memory, and there is no raw PCM streaming, clinical anxiety detection, universal phone-to-phone NFC exchange, résumé-file ingestion, production alerting, or deployed dashboard. Operational logs are structured and omit request bodies and credentials, but full tracing/metrics arrives in Milestone 7.
 
-Milestone 6 is next: controlled digital cards and contact exchange. The remaining roadmap is described in [Architecture](docs/ARCHITECTURE.md).
+Milestone 7 is next: observability, privacy completion, and Google Cloud deployment. The remaining roadmap is described in [Architecture](docs/ARCHITECTURE.md).
 
 For deployment-specific caveats, see [Google Cloud deployment](infra/gcp/README.md).

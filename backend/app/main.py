@@ -15,15 +15,17 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from .core.auth import resolve_identity
 from .core.config import settings
 from .core.logging import configure_logging, install_request_logging
 from .schemas.profiles import Profile, ProfileUpdate
+from .schemas.cards import Card, CardUpdate, Contact, ContactCreate, ContactUpdate, ConversationNoteLink, PublicCard
+from .services.cards import SLUG_PATTERN, card_html, public_projection, qr_svg, vcard
 from .services.context import build_cue_prompt
 from .services.inference import check_provider_auth, demo_cues, generate_text, validate_cues
 from .services.summaries import finalize as finalize_conversation
@@ -117,6 +119,52 @@ def contact_key(owner, contact):
 def profile_key(user_id):
     return 'profile:'+hashlib.sha256(user_id.encode()).hexdigest()
 
+def owner_key(prefix, user_id):
+    return prefix+':'+hashlib.sha256(user_id.encode()).hexdigest()
+
+def public_card_url(slug):
+    return f'{settings.public_base_url}/c/{slug}'
+
+def new_card(identity):
+    profile = read(profile_key(identity.user_id)) or {}
+    return {
+        'display_name':profile.get('display_name',''), 'headline':profile.get('headline',''),
+        'organization':profile.get('organization',''), 'email':identity.email or '',
+        'phone':'', 'website':profile.get('portfolio_url',''), 'bio':'', 'published':False,
+        'visibility':{field:True for field in ('display_name','headline','organization','email','phone','website','bio')},
+        'slug':secrets.token_urlsafe(18), 'updated_at':datetime.now(timezone.utc).isoformat(),
+    }
+
+def get_or_create_card(identity):
+    key = owner_key('card', identity.user_id)
+    record = read(key)
+    if not record:
+        record = new_card(identity)
+        write(key, record)
+        write('public-card:'+record['slug'], {'owner_key':key})
+    return key, record
+
+_public_reads: dict[str, tuple[int, int]] = {}
+
+def rate_limit_public(request: Request):
+    address = request.client.host if request.client else 'unknown'
+    minute = int(time.time() // 60)
+    old_minute, count = _public_reads.get(address, (minute, 0))
+    count = count + 1 if old_minute == minute else 1
+    _public_reads[address] = (minute, count)
+    if count > 90:
+        raise HTTPException(429, 'Too many card requests. Try again shortly.')
+
+def resolve_public_card(slug: str, request: Request) -> dict:
+    rate_limit_public(request)
+    if not SLUG_PATTERN.fullmatch(slug):
+        raise HTTPException(404, 'Card not found')
+    pointer = read('public-card:'+slug)
+    record = read(pointer['owner_key']) if pointer else None
+    if not record or not record.get('published') or record.get('slug') != slug:
+        raise HTTPException(404, 'Card not found')
+    return public_projection(record, public_card_url(slug))
+
 def authorize(sid, request):
     state = read('session:'+sid)
     raw = request.headers.get('authorization', '').removeprefix('Bearer ')
@@ -183,6 +231,129 @@ def delete_profile(request: Request):
     identity = resolve_identity(settings, request)
     delete(profile_key(identity.user_id))
     return {'deleted':True}
+
+@app.get('/card/me', response_model=Card)
+def get_card(request: Request):
+    identity = resolve_identity(settings, request)
+    _, record = get_or_create_card(identity)
+    return Card.model_validate(dict(record, public_url=public_card_url(record['slug'])))
+
+@app.put('/card/me', response_model=Card)
+def put_card(body: CardUpdate, request: Request):
+    identity = resolve_identity(settings, request)
+    key, old = get_or_create_card(identity)
+    record = body.model_dump()
+    record.update(slug=old['slug'], updated_at=datetime.now(timezone.utc).isoformat())
+    if record['published'] and not record.get('display_name'):
+        raise HTTPException(422, 'Add a visible name before publishing')
+    if record['published'] and not record['visibility'].get('display_name', True):
+        raise HTTPException(422, 'Your name must be visible while the card is published')
+    write(key, record)
+    return Card.model_validate(dict(record, public_url=public_card_url(record['slug'])))
+
+@app.post('/card/me/rotate', response_model=Card)
+def rotate_card(request: Request):
+    identity = resolve_identity(settings, request)
+    key, record = get_or_create_card(identity)
+    delete('public-card:'+record['slug'])
+    record['slug'] = secrets.token_urlsafe(18)
+    record['updated_at'] = datetime.now(timezone.utc).isoformat()
+    write(key, record)
+    write('public-card:'+record['slug'], {'owner_key':key})
+    return Card.model_validate(dict(record, public_url=public_card_url(record['slug'])))
+
+@app.delete('/card/me')
+def revoke_card(request: Request):
+    identity = resolve_identity(settings, request)
+    key, record = get_or_create_card(identity)
+    delete('public-card:'+record['slug'])
+    record.update(published=False, slug=secrets.token_urlsafe(18), updated_at=datetime.now(timezone.utc).isoformat())
+    write(key, record)
+    write('public-card:'+record['slug'], {'owner_key':key})
+    return {'revoked':True, 'public_url':public_card_url(record['slug'])}
+
+@app.get('/c/{slug}/data', response_model=PublicCard)
+def public_card_data(slug: str, request: Request):
+    return PublicCard.model_validate(resolve_public_card(slug, request))
+
+@app.get('/c/{slug}/qr.svg')
+def public_card_qr(slug: str, request: Request):
+    card = resolve_public_card(slug, request)
+    return Response(qr_svg(card['public_url']), media_type='image/svg+xml', headers={'Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff'})
+
+@app.get('/c/{slug}.vcf')
+def public_card_vcard(slug: str, request: Request):
+    card = resolve_public_card(slug, request)
+    filename = re.sub(r'[^A-Za-z0-9_-]+', '-', card.get('display_name') or 'contact').strip('-') or 'contact'
+    return Response(vcard(card), media_type='text/vcard; charset=utf-8', headers={'Content-Disposition':f'attachment; filename="{filename}.vcf"','X-Content-Type-Options':'nosniff'})
+
+@app.get('/c/{slug}', response_class=HTMLResponse)
+def public_card_page(slug: str, request: Request):
+    card = resolve_public_card(slug, request)
+    return HTMLResponse(card_html(card), headers={'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",'Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'})
+
+def contact_store(identity):
+    return owner_key('contacts', identity.user_id)
+
+@app.get('/contacts', response_model=list[Contact])
+def list_contacts(request: Request, q: str = Query(default='', max_length=100)):
+    identity = resolve_identity(settings, request)
+    contacts = (read(contact_store(identity)) or {}).get('items', [])
+    needle = q.strip().casefold()
+    if needle:
+        contacts = [item for item in contacts if needle in ' '.join((item['snapshot'].get('display_name',''), item['snapshot'].get('headline',''), item['snapshot'].get('organization',''), item.get('user_notes',''))).casefold()]
+    return contacts
+
+@app.post('/contacts', response_model=Contact, status_code=201)
+def create_contact(body: ContactCreate, request: Request):
+    identity = resolve_identity(settings, request)
+    key = contact_store(identity)
+    store = read(key) or {'items':[]}
+    now = datetime.now(timezone.utc).isoformat()
+    item = {'id':str(uuid.uuid4()), 'source':body.source, 'exchanged_at':now, 'snapshot':body.snapshot.model_dump(), 'user_notes':body.user_notes, 'conversation_note':''}
+    # Keep the aggregate record comfortably below Firestore's 1 MiB document limit.
+    store['items'] = [item] + store['items'][:199]
+    write(key, store)
+    return Contact.model_validate(item)
+
+def owned_contact(identity, contact_id):
+    key = contact_store(identity)
+    store = read(key) or {'items':[]}
+    item = next((item for item in store['items'] if item['id'] == contact_id), None)
+    if not item:
+        raise HTTPException(404, 'Contact not found')
+    return key, store, item
+
+@app.put('/contacts/{contact_id}', response_model=Contact)
+def update_contact(contact_id: str, body: ContactUpdate, request: Request):
+    identity = resolve_identity(settings, request)
+    key, store, item = owned_contact(identity, contact_id)
+    item['user_notes'] = body.user_notes
+    write(key, store)
+    return Contact.model_validate(item)
+
+@app.post('/contacts/{contact_id}/conversation-note', response_model=Contact)
+def link_conversation_note(contact_id: str, body: ConversationNoteLink, request: Request):
+    identity = resolve_identity(settings, request)
+    key, store, item = owned_contact(identity, contact_id)
+    item['conversation_note'] = body.note.strip()
+    write(key, store)
+    return Contact.model_validate(item)
+
+@app.delete('/contacts/{contact_id}')
+def delete_contact(contact_id: str, request: Request):
+    identity = resolve_identity(settings, request)
+    key, store, _ = owned_contact(identity, contact_id)
+    store['items'] = [item for item in store['items'] if item['id'] != contact_id]
+    write(key, store)
+    return {'deleted':True}
+
+@app.get('/contacts.vcf')
+def export_contacts(request: Request):
+    identity = resolve_identity(settings, request)
+    items = (read(contact_store(identity)) or {}).get('items', [])
+    content = ''.join(vcard(item['snapshot']) for item in items)
+    return Response(content, media_type='text/vcard; charset=utf-8', headers={'Content-Disposition':'attachment; filename="wings-contacts.vcf"','X-Content-Type-Options':'nosniff'})
 
 @app.post('/session/start')
 def start(body: Start, request: Request):

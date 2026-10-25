@@ -10,11 +10,15 @@ import {
   Platform,
   ActivityIndicator,
   Switch,
+  Linking,
+  Share,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
 import { StatusBar } from "expo-status-bar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import QRCode from "react-native-qrcode-svg";
 import { useRollingAudioPipeline } from "./src/audioPipeline";
 import {
   DifficultyDetector,
@@ -44,6 +48,45 @@ type Profile = {
   resume_summary: string;
   email?: string | null;
   updated_at?: string | null;
+};
+type CardField =
+  | "display_name"
+  | "headline"
+  | "organization"
+  | "email"
+  | "phone"
+  | "website"
+  | "bio";
+type PublicCard = Record<CardField, string> & {
+  public_url: string;
+  updated_at?: string | null;
+};
+type DigitalCard = PublicCard & {
+  published: boolean;
+  slug: string;
+  visibility: Record<CardField, boolean>;
+};
+type SavedContact = {
+  id: string;
+  source: "qr" | "link" | "vcard" | "manual";
+  exchanged_at: string;
+  snapshot: PublicCard;
+  user_notes: string;
+  conversation_note: string;
+};
+const CARD_FIELDS: { key: CardField; label: string; placeholder: string }[] = [
+  { key: "display_name", label: "Name", placeholder: "Your public name" },
+  { key: "headline", label: "Headline", placeholder: "What you do" },
+  { key: "organization", label: "Organization", placeholder: "University or organization" },
+  { key: "email", label: "Email", placeholder: "Public email" },
+  { key: "phone", label: "Phone", placeholder: "Public phone (optional)" },
+  { key: "website", label: "Website", placeholder: "https://…" },
+  { key: "bio", label: "Short bio", placeholder: "A brief introduction" },
+];
+const EMPTY_CARD: DigitalCard = {
+  display_name: "", headline: "", organization: "", email: "", phone: "", website: "", bio: "",
+  published: false, visibility: Object.fromEntries(CARD_FIELDS.map(({ key }) => [key, true])) as Record<CardField, boolean>,
+  public_url: "", slug: "",
 };
 const EMPTY_PROFILE: Profile = {
   display_name: "",
@@ -125,6 +168,13 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
+  const [card, setCard] = useState<DigitalCard>(EMPTY_CARD);
+  const [contacts, setContacts] = useState<SavedContact[]>([]);
+  const [contactSearch, setContactSearch] = useState("");
+  const [scannedCard, setScannedCard] = useState<PublicCard | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanLocked, setScanLocked] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const difficultyDetector = useRef(new DifficultyDetector());
   const autoAssistRef = useRef(false);
   const assistantSpeakingRef = useRef(false);
@@ -184,6 +234,10 @@ export default function App() {
     void loadProfile();
   }, [authReady, owner, authUser?.uid]);
   useEffect(() => {
+    if (page !== "card" || !authReady || !owner || (firebaseConfigured && !authUser)) return;
+    void loadExchange();
+  }, [page, authReady, owner, authUser?.uid]);
+  useEffect(() => {
     if (!session || ended) return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
@@ -239,6 +293,144 @@ export default function App() {
       );
     }
     return res.json();
+  }
+  async function identityFetch(path: string, init: RequestInit = {}) {
+    const token = firebaseConfigured ? await getIdentityToken() : null;
+    if (firebaseConfigured && !token) throw new Error("Sign in to access cards and contacts.");
+    const response = await fetch(API + path, {
+      ...init,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : { "X-Demo-Owner": owner }),
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+        ...(init.headers || {}),
+      },
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.detail || `Request failed (${response.status})`);
+    }
+    return response;
+  }
+  async function loadExchange() {
+    try {
+      const [cardResponse, contactsResponse] = await Promise.all([
+        identityFetch("/card/me"), identityFetch(`/contacts?q=${encodeURIComponent(contactSearch)}`),
+      ]);
+      setCard(await cardResponse.json());
+      setContacts(await contactsResponse.json());
+    } catch (e: any) {
+      setError(e.message || "Could not load cards and contacts.");
+    }
+  }
+  async function loadContacts() {
+    try {
+      const response = await identityFetch(`/contacts?q=${encodeURIComponent(contactSearch)}`);
+      setContacts(await response.json());
+    } catch (e: any) {
+      setError(e.message || "Could not search contacts.");
+    }
+  }
+  async function saveCard(next = card) {
+    await run("Saving your public card", async () => {
+      const response = await identityFetch("/card/me", {
+        method: "PUT",
+        body: JSON.stringify({
+          ...Object.fromEntries(CARD_FIELDS.map(({ key }) => [key, next[key]])),
+          published: next.published,
+          visibility: next.visibility,
+        }),
+      });
+      setCard(await response.json());
+    });
+  }
+  async function rotateCard() {
+    await run("Rotating your card link", async () => {
+      const response = await identityFetch("/card/me/rotate", { method: "POST" });
+      setCard(await response.json());
+    });
+  }
+  async function revokeCard() {
+    await run("Revoking your public card", async () => {
+      await identityFetch("/card/me", { method: "DELETE" });
+      const response = await identityFetch("/card/me");
+      setCard(await response.json());
+    });
+  }
+  async function beginScan() {
+    const permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
+    if (!permission.granted) {
+      setError("Camera permission is required to scan a QR code. You can still open or paste a shared link.");
+      return;
+    }
+    setScannedCard(null);
+    setScanLocked(false);
+    setScanning(true);
+  }
+  async function inspectSharedUrl(value: string) {
+    if (scanLocked) return;
+    setScanLocked(true);
+    try {
+      const shared = new URL(value);
+      const expected = new URL(API);
+      const match = shared.pathname.match(/^\/c\/([A-Za-z0-9_-]{20,64})$/);
+      if (shared.origin !== expected.origin || !match) throw new Error("This QR code is not a valid Wings card link.");
+      const response = await fetch(`${shared.origin}${shared.pathname}/data`);
+      if (!response.ok) throw new Error("This card is unavailable or has been revoked.");
+      setScannedCard(await response.json());
+      setScanning(false);
+    } catch (e: any) {
+      setError(e.message || "Could not read this card.");
+      setScanning(false);
+    }
+  }
+  async function saveScannedContact() {
+    if (!scannedCard) return;
+    await run("Saving this contact", async () => {
+      const response = await identityFetch("/contacts", {
+        method: "POST", body: JSON.stringify({ source: "qr", snapshot: scannedCard, user_notes: "" }),
+      });
+      const saved = await response.json();
+      setContacts((items) => [saved, ...items]);
+      setScannedCard(null);
+    });
+  }
+  async function updateContact(item: SavedContact) {
+    await run("Saving contact notes", async () => {
+      const response = await identityFetch(`/contacts/${item.id}`, {
+        method: "PUT", body: JSON.stringify({ user_notes: item.user_notes }),
+      });
+      const saved = await response.json();
+      setContacts((items) => items.map((current) => current.id === saved.id ? saved : current));
+    });
+  }
+  async function removeContact(id: string) {
+    await run("Deleting contact", async () => {
+      await identityFetch(`/contacts/${id}`, { method: "DELETE" });
+      setContacts((items) => items.filter((item) => item.id !== id));
+    });
+  }
+  async function linkContactNote(item: SavedContact) {
+    if (!ended?.summary) return;
+    await run("Linking your selected conversation note", async () => {
+      const response = await identityFetch(`/contacts/${item.id}/conversation-note`, {
+        method: "POST", body: JSON.stringify({ note: ended.summary }),
+      });
+      const saved = await response.json();
+      setContacts((items) => items.map((current) => current.id === saved.id ? saved : current));
+    });
+  }
+  async function exportContacts() {
+    await run("Preparing vCards", async () => {
+      const response = await identityFetch("/contacts.vcf");
+      const text = await response.text();
+      if (Platform.OS === "web") {
+        const href = URL.createObjectURL(new Blob([text], { type: "text/vcard" }));
+        const anchor = document.createElement("a");
+        anchor.href = href; anchor.download = "wings-contacts.vcf"; anchor.click(); URL.revokeObjectURL(href);
+      } else {
+        await Share.share({ title: "Wings contacts", message: text });
+      }
+    });
   }
   async function loadProfile() {
     try {
@@ -472,6 +664,7 @@ export default function App() {
               icon: "person-circle-outline",
               label: "Your profile",
             },
+            { id: "card", icon: "id-card-outline", label: "Card & contacts" },
             { id: "notes", icon: "albums-outline", label: "Personal notes" },
             {
               id: "about",
@@ -546,6 +739,8 @@ export default function App() {
               ? "LIVE COMPANION"
               : page === "profile"
                 ? "PROFILE"
+                : page === "card"
+                  ? "CARD & CONTACTS"
                 : page === "notes"
                   ? "PERSONAL NOTES"
                   : "PRIVACY"}
@@ -593,6 +788,7 @@ export default function App() {
             {[
               ["session", "Conversation"],
               ["profile", "Profile"],
+              ["card", "Card"],
               ["notes", "Notes"],
               ["about", "Privacy"],
             ].map(([id, label]) => (
@@ -617,6 +813,8 @@ export default function App() {
                 ? "BE HERE. WE’VE GOT YOUR BACK."
                 : page === "profile"
                   ? "YOUR CONTEXT, YOUR CONTROL"
+                  : page === "card"
+                    ? "SHARE ONLY WHAT YOU CHOOSE"
                   : "THOUGHTFUL BY DESIGN"}
             </Text>
             <Text style={s.heading}>
@@ -624,6 +822,8 @@ export default function App() {
                 ? "Good conversations start\nwith a little curiosity."
                 : page === "profile"
                   ? "Your story,\nready when you are."
+                  : page === "card"
+                    ? "Your card,\nyour connections."
                   : page === "notes"
                     ? "A little context,\nfor next time."
                     : "Your conversation.\nYour choice."}
@@ -633,6 +833,8 @@ export default function App() {
                 ? "Stay in the moment. Your wingman will find the words when you need them."
                 : page === "profile"
                   ? "Keep the professional context you want your wingman to know. You can edit or delete it anytime."
+                  : page === "card"
+                    ? "Choose every public field, share by QR or link, and keep exchanged contacts in one place."
                   : "Less to keep. More room to connect."}
             </Text>
           </View>
@@ -660,7 +862,142 @@ export default function App() {
             </Pressable>
           </View>
         )}
-        {page === "profile" ? (
+        {page === "card" ? (
+          <View style={{ gap: 22 }}>
+            {firebaseConfigured && !authUser ? (
+              <View style={s.card}>
+                <Text style={s.cardTitle}>Sign in to manage your card</Text>
+                <Text style={[s.small, { marginVertical: 14 }]}>Cards and contacts are isolated by your verified account.</Text>
+                <Button text="Go to sign in" icon="log-in-outline" onPress={() => setPage("profile")} />
+              </View>
+            ) : (
+              <>
+                <View style={[s.columns, !wide && { flexDirection: "column" }]}>
+                  <View style={[s.card, { flex: 1, gap: 14 }]}>
+                    <View style={s.cardHeader}>
+                      <View style={s.iconTile}><Icon name="id-card-outline" /></View>
+                      <Text style={s.cardTitle}>Public card editor</Text>
+                    </View>
+                    <Text style={s.small}>Your professional profile stays private. Only enabled fields on this separate card appear publicly.</Text>
+                    {CARD_FIELDS.map(({ key, label, placeholder }) => (
+                      <View key={key} style={s.cardFieldRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.label}>{label.toUpperCase()}</Text>
+                          <TextInput
+                            value={card[key]}
+                            onChangeText={(value) => setCard({ ...card, [key]: value })}
+                            placeholder={placeholder}
+                            placeholderTextColor={C.muted}
+                            multiline={key === "bio"}
+                            autoCapitalize={key === "email" || key === "website" ? "none" : "sentences"}
+                            style={[s.profileInput, key === "bio" && s.profileMultiline]}
+                          />
+                        </View>
+                        <View style={{ alignItems: "center", gap: 4 }}>
+                          <Switch
+                            accessibilityLabel={`Share ${label}`}
+                            disabled={key === "display_name" && card.published}
+                            value={card.visibility[key]}
+                            onValueChange={(value) => setCard({ ...card, visibility: { ...card.visibility, [key]: value } })}
+                            trackColor={{ false: "#DDE3DA", true: C.green }} thumbColor="#fff"
+                          />
+                          <Text style={s.tiny}>{card.visibility[key] ? "Public" : "Private"}</Text>
+                        </View>
+                      </View>
+                    ))}
+                    <View style={s.toggleRow}>
+                      <View style={{ flex: 1 }}><Text style={s.toggleTitle}>Publish card</Text><Text style={s.tiny}>Turning this off immediately hides the public page.</Text></View>
+                      <Switch value={card.published} onValueChange={(published) => setCard({ ...card, published })} trackColor={{ false: "#DDE3DA", true: C.green }} thumbColor="#fff" />
+                    </View>
+                    <View style={s.profileActions}>
+                      <Button text="Save card" icon="checkmark-outline" onPress={() => saveCard()} />
+                      <Button text="Rotate link" outline icon="refresh-outline" onPress={rotateCard} />
+                      <Button text="Revoke card" outline icon="close-circle-outline" onPress={revokeCard} />
+                    </View>
+                  </View>
+                  <View style={[s.card, s.cardPreview]}>
+                    <Text style={s.label}>PUBLIC PREVIEW</Text>
+                    <View style={s.contactAvatar}><Text style={s.initials}>{card.display_name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "YO"}</Text></View>
+                    <Text style={s.serif}>{card.visibility.display_name ? card.display_name || "Your name" : ""}</Text>
+                    {CARD_FIELDS.filter(({ key }) => key !== "display_name" && card.visibility[key] && card[key]).map(({ key }) => (
+                      <Text key={key} style={key === "headline" ? s.cardTitle : s.small}>{card[key]}</Text>
+                    ))}
+                    {card.published && card.public_url ? (
+                      <>
+                        <View style={s.qrFrame}><QRCode value={card.public_url} size={190} color={C.ink} backgroundColor="#fff" /></View>
+                        <Text selectable style={[s.tiny, { textAlign: "center" }]}>{card.public_url}</Text>
+                        <Button text="Open public card" outline icon="open-outline" onPress={() => void Linking.openURL(card.public_url)} />
+                        <Button text="Download my vCard" outline icon="download-outline" onPress={() => void Linking.openURL(card.public_url + ".vcf")} />
+                      </>
+                    ) : <Text style={s.small}>Publish and save to activate the QR code, link, and vCard.</Text>}
+                    <View style={s.nfcNote}><Icon name="phone-portrait-outline" /><Text style={[s.small, { flex: 1 }]}>NFC works only with compatible, pre-written NDEF tags and supported devices. Wings does not claim universal phone-to-phone NFC sharing; use this QR, link, or vCard fallback.</Text></View>
+                  </View>
+                </View>
+
+                <View style={s.card}>
+                  <View style={s.cardHeader}>
+                    <View style={s.iconTile}><Icon name="qr-code-outline" /></View>
+                    <Text style={s.cardTitle}>Exchange a card</Text>
+                  </View>
+                  <Text style={[s.small, { marginVertical: 14 }]}>Wings validates scanned links and shows the shared fields before anything is saved.</Text>
+                  {!scanning && !scannedCard && <Button text="Scan a Wings QR code" icon="scan-outline" onPress={beginScan} />}
+                  {scanning && (
+                    <View style={s.scanner}>
+                      <CameraView
+                        style={{ flex: 1 }}
+                        barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                        onBarcodeScanned={({ data }) => void inspectSharedUrl(data)}
+                      />
+                      <Pressable style={s.scannerClose} onPress={() => setScanning(false)}><Icon name="close" color="#fff" /></Pressable>
+                    </View>
+                  )}
+                  {scannedCard && (
+                    <View style={s.scannedPreview}>
+                      <Text style={s.cardTitle}>{scannedCard.display_name}</Text>
+                      <Text style={s.small}>{[scannedCard.headline, scannedCard.organization].filter(Boolean).join(" · ")}</Text>
+                      <Text style={s.tiny}>Review complete. Save only with your confirmation.</Text>
+                      <View style={s.profileActions}>
+                        <Button text="Open shared page" outline icon="open-outline" onPress={() => void Linking.openURL(scannedCard.public_url)} />
+                        <Button text="Save contact" icon="person-add-outline" onPress={saveScannedContact} />
+                        <Button text="Cancel" outline onPress={() => setScannedCard(null)} />
+                      </View>
+                    </View>
+                  )}
+                </View>
+
+                <View style={[s.card, { gap: 14 }]}>
+                  <View style={s.cardHeader}>
+                    <View style={s.iconTile}><Icon name="people-outline" /></View>
+                    <Text style={s.cardTitle}>Saved contacts</Text>
+                    <View style={{ marginLeft: "auto" }}><Button text="Export vCards" outline icon="download-outline" onPress={exportContacts} /></View>
+                  </View>
+                  <View style={s.inputRow}>
+                    <Icon name="search-outline" />
+                    <TextInput value={contactSearch} onChangeText={setContactSearch} onSubmitEditing={() => void loadContacts()} placeholder="Search name, organization, or notes" style={s.transcriptInput} />
+                    <Pressable style={s.send} onPress={() => void loadContacts()}><Icon name="arrow-forward" color="#fff" size={16} /></Pressable>
+                  </View>
+                  {contacts.length === 0 ? <Text style={s.small}>No exchanged contacts match this search.</Text> : contacts.map((item) => (
+                    <View key={item.id} style={s.savedContact}>
+                      <View style={{ flex: 1, gap: 5 }}>
+                        <Text style={s.cardTitle}>{item.snapshot.display_name || "Unnamed contact"}</Text>
+                        <Text style={s.small}>{[item.snapshot.headline, item.snapshot.organization].filter(Boolean).join(" · ")}</Text>
+                        <Text style={s.tiny}>Saved from {item.source.toUpperCase()} · {new Date(item.exchanged_at).toLocaleDateString()}</Text>
+                        <TextInput multiline value={item.user_notes} onChangeText={(value) => setContacts((items) => items.map((current) => current.id === item.id ? { ...current, user_notes: value } : current))} placeholder="Your private notes" style={[s.profileInput, s.profileMultiline]} />
+                        {item.conversation_note ? <Text style={s.footnote}>Linked conversation note: {item.conversation_note}</Text> : null}
+                        <View style={s.profileActions}>
+                          <Button text="Open card" outline icon="open-outline" onPress={() => void Linking.openURL(item.snapshot.public_url)} />
+                          <Button text="Save notes" outline icon="checkmark-outline" onPress={() => updateContact(item)} />
+                          {ended?.summary ? <Button text="Attach latest summary" outline icon="link-outline" onPress={() => linkContactNote(item)} /> : null}
+                          <Button text="Delete" outline icon="trash-outline" onPress={() => removeContact(item.id)} />
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
+          </View>
+        ) : page === "profile" ? (
           <View style={[s.card, { maxWidth: 760 }]}>
             {firebaseConfigured && !authUser ? (
               <View style={{ gap: 15 }}>
@@ -820,8 +1157,8 @@ export default function App() {
                 />
                 <Text style={s.footnote}>
                   Profile information is stored by your authenticated user ID in
-                  Firebase mode. It is not yet added to AI prompts; that belongs
-                  to Milestone 5.
+                  Firebase mode. Selected bounded fields can support cues, while
+                  your public card is edited separately under Card & contacts.
                 </Text>
                 <View style={s.profileActions}>
                   <Button
@@ -1003,8 +1340,8 @@ export default function App() {
                     />
                   </View>
                   <Text style={s.footnote}>
-                    Used only as a contact label. Profile fetching and NFC are
-                    not enabled.
+                    Used only as a private contact label. Wings never scrapes the
+                    linked service.
                   </Text>
                   <View style={s.toggleRow}>
                     <View style={{ flex: 1 }}>
@@ -1628,6 +1965,68 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.line,
     padding: 24,
+  },
+  cardFieldRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    borderTopWidth: 1,
+    borderColor: "#EFF1EA",
+    paddingTop: 12,
+  },
+  cardPreview: {
+    flex: 0.72,
+    alignItems: "center",
+    gap: 12,
+    minWidth: 280,
+  },
+  qrFrame: {
+    backgroundColor: "#fff",
+    padding: 14,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 12,
+  },
+  nfcNote: {
+    flexDirection: "row",
+    gap: 10,
+    backgroundColor: C.pale,
+    padding: 13,
+    borderRadius: 9,
+    marginTop: 8,
+  },
+  scanner: {
+    height: 340,
+    maxWidth: 520,
+    width: "100%",
+    overflow: "hidden",
+    borderRadius: 12,
+    backgroundColor: "#111",
+  },
+  scannerClose: {
+    position: "absolute",
+    right: 12,
+    top: 12,
+    width: 38,
+    height: 38,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,.65)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scannedPreview: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 10,
+    padding: 18,
+    gap: 9,
+  },
+  savedContact: {
+    borderTopWidth: 1,
+    borderColor: C.line,
+    paddingTop: 16,
+    flexDirection: "row",
   },
   cardHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
   iconTile: {

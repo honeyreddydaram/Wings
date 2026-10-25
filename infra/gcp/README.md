@@ -6,6 +6,8 @@ This integration uses synchronous recognition of completed recordings, not strea
 
 The active deployment targets Cloud Run for the API and web app and Firestore for session state and personal notes. Vertex AI Gemma 3 27B IT generates cues and summaries using the Cloud Run service account; Google Speech-to-Text V2 Chirp 3 transcribes audio. Device speech provides cue voice. SQLite demo mode still works without cloud credentials.
 
+The API also serves public digital-card pages, QR images, and vCards. `PUBLIC_BASE_URL` must be its externally reachable HTTPS origin; `deploy.sh` updates this automatically after Cloud Run assigns the API URL. Public card routes are intentionally unauthenticated, while card editing and exchanged-contact routes use Firebase identity in a production configuration.
+
 Firebase authentication is optional during deployment. Enable Email/Password in the Firebase console, export `AUTH_MODE=firebase`, and provide every `EXPO_PUBLIC_FIREBASE_*` value listed in `mobile/.env.example` before running the script. The backend uses Application Default Credentials to verify client ID tokens; no service-account key belongs in the mobile build. If `AUTH_MODE` is omitted, deployment preserves demo identity behavior.
 
 1. Select or create a Google Cloud project and link billing. Choose a region (default `us-central1`).

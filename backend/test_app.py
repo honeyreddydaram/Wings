@@ -196,3 +196,88 @@ def test_live_cues_use_bounded_profile_context_and_fallback(monkeypatch):
     fallback = client.post(f"/session/{session['id']}/cue", headers=headers)
     assert fallback.status_code == 200
     assert fallback.json()['fallback'] is True
+
+
+def test_public_card_visibility_vcard_rotation_and_revocation():
+    headers = {'X-Demo-Owner':'card-owner-alice-123456789012'}
+    draft = client.get('/card/me', headers=headers)
+    assert draft.status_code == 200
+    assert draft.json()['published'] is False
+    payload = {
+        'display_name':'Alice Example', 'headline':'Accessibility engineer',
+        'organization':'University of Florida', 'email':'private@example.com',
+        'phone':'+1 352 555 0100', 'website':'https://example.com',
+        'bio':'Building inclusive software.', 'published':True,
+        'visibility':{'display_name':True,'headline':True,'organization':True,'email':False,'phone':True,'website':True,'bio':True},
+    }
+    saved = client.put('/card/me', headers=headers, json=payload)
+    assert saved.status_code == 200
+    old_url = saved.json()['public_url']
+    path = old_url.removeprefix(main_module.settings.public_base_url)
+    public = client.get(path+'/data')
+    assert public.status_code == 200
+    assert public.json()['display_name'] == 'Alice Example'
+    assert public.json()['email'] == ''
+    html = client.get(path)
+    assert html.status_code == 200 and 'Wings is not required' in html.text
+    assert 'private@example.com' not in html.text
+    assert "frame-ancestors 'none'" in html.headers['content-security-policy']
+    card_file = client.get(path+'.vcf')
+    assert card_file.status_code == 200
+    assert 'BEGIN:VCARD' in card_file.text and 'private@example.com' not in card_file.text
+    qr = client.get(path+'/qr.svg')
+    assert qr.status_code == 200 and qr.headers['content-type'].startswith('image/svg+xml')
+
+    rotated = client.post('/card/me/rotate', headers=headers)
+    assert rotated.status_code == 200 and rotated.json()['public_url'] != old_url
+    assert client.get(path).status_code == 404
+    new_path = rotated.json()['public_url'].removeprefix(main_module.settings.public_base_url)
+    assert client.get(new_path).status_code == 200
+    assert client.delete('/card/me', headers=headers).json()['revoked'] is True
+    assert client.get(new_path).status_code == 404
+
+
+def test_card_publish_requires_visible_name_and_escapes_html():
+    headers = {'X-Demo-Owner':'card-owner-escape-123456789012'}
+    hidden = client.put('/card/me', headers=headers, json={
+        'display_name':'Alice', 'published':True, 'visibility':{'display_name':False},
+    })
+    assert hidden.status_code == 422
+    saved = client.put('/card/me', headers=headers, json={
+        'display_name':'<script>alert(1)</script>', 'bio':'<img src=x onerror=alert(1)>',
+        'published':True,
+    })
+    path = saved.json()['public_url'].removeprefix(main_module.settings.public_base_url)
+    page = client.get(path)
+    assert '<script>alert(1)</script>' not in page.text
+    assert '&lt;script&gt;' in page.text and '&lt;img' in page.text
+    assert client.get('/c/not-valid').status_code == 404
+
+
+def test_contacts_are_isolated_searchable_editable_exportable_and_deletable():
+    alice = {'X-Demo-Owner':'contacts-owner-alice-123456789'}
+    bob = {'X-Demo-Owner':'contacts-owner-bob-12345678901'}
+    snapshot = {
+        'display_name':'Taylor Person', 'headline':'ML student', 'organization':'UF',
+        'email':'taylor@example.com', 'phone':'', 'website':'https://example.com',
+        'bio':'Interested in accessible AI.', 'public_url':'https://cards.example/c/opaque-token-123456789',
+    }
+    created = client.post('/contacts', headers=alice, json={'source':'qr','snapshot':snapshot,'user_notes':'Met at demo day'})
+    assert created.status_code == 201
+    item = created.json()
+    assert item['source'] == 'qr' and item['exchanged_at']
+    assert client.get('/contacts', headers=bob).json() == []
+    assert len(client.get('/contacts?q=demo', headers=alice).json()) == 1
+    assert client.get('/contacts?q=missing', headers=alice).json() == []
+
+    changed = client.put(f"/contacts/{item['id']}", headers=alice, json={'user_notes':'Follow up next week'})
+    assert changed.json()['user_notes'] == 'Follow up next week'
+    linked = client.post(f"/contacts/{item['id']}/conversation-note", headers=alice, json={'note':'Explicitly selected summary'})
+    assert linked.json()['conversation_note'] == 'Explicitly selected summary'
+    assert client.put(f"/contacts/{item['id']}", headers=bob, json={'user_notes':'no'}).status_code == 404
+    exported = client.get('/contacts.vcf', headers=alice)
+    assert 'Taylor Person' in exported.text and 'BEGIN:VCARD' in exported.text
+    assert client.delete(f"/contacts/{item['id']}", headers=alice).json() == {'deleted':True}
+    assert client.get('/contacts', headers=alice).json() == []
+    snapshot['public_url'] = 'javascript:alert(1)'
+    assert client.post('/contacts', headers=alice, json={'source':'link','snapshot':snapshot}).status_code == 422

@@ -24,6 +24,12 @@
           "microphonePermission": "Allow Co-Wingman to record short conversation chunks only while you show the recording indicator."
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Co-Wingman to scan a QR code only while the card scanner is open."
+        }
+      ],
       "expo-asset"
     ]
   }

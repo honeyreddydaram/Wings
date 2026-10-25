@@ -23,6 +23,7 @@ fi
 gcloud firestore fields ttls update expires_at --collection-group=cowingman --enable-ttl --project "$PROJECT"
 gcloud run deploy cowingman-api --source backend --region "$REGION" --project "$PROJECT" --service-account "$ACCOUNT" --port 8000 --memory 512Mi --cpu 1 --min 0 --max 3 --allow-unauthenticated --set-env-vars "APP_MODE=live,AUTH_MODE=$AUTH_MODE,FIREBASE_PROJECT_ID=$PROJECT,FIRESTORE_COLLECTION=cowingman,GOOGLE_CLOUD_PROJECT=$PROJECT,SPEECH_LOCATION=us,SPEECH_LANGUAGE=en-US,INFERENCE_PROVIDER=gemma,GEMMA_MODEL=google/gemma-3-27b-it,GEMMA_LOCATION=global"
 API_URL="$(gcloud run services describe cowingman-api --region "$REGION" --project "$PROJECT" --format='value(status.url)')"
+gcloud run services update cowingman-api --region "$REGION" --project "$PROJECT" --update-env-vars "PUBLIC_BASE_URL=$API_URL"
 EXPO_PUBLIC_API_URL="$API_URL" EXPO_HOME=/tmp/wings-expo EXPO_NO_TELEMETRY=1 npm run build --prefix mobile
 STAGING="$(mktemp -d /tmp/cowingman-web.XXXXXX)"
 mkdir -p "$STAGING/mobile"

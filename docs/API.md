@@ -134,6 +134,33 @@ Response `200`:
 
 Optional Cloud Storage failure does not fail the response. Provider summary failure uses a bounded deterministic summary and follow-up. Common session errors still apply. Further session calls return `410`.
 
-## Future proposals (not implemented)
+## Public cards
 
-M6 may add card/QR/vCard endpoints. These are intentionally excluded from the current contract until implemented.
+Authenticated card management uses the same Firebase bearer token or demo identity header as profiles.
+
+- `GET /card/me` creates or returns the caller's separate card draft.
+- `PUT /card/me` replaces card fields, per-field visibility, and `published`. A visible name is required to publish.
+- `POST /card/me/rotate` invalidates the previous unguessable URL and returns a new one.
+- `DELETE /card/me` immediately unpublishes and rotates the URL.
+
+The following read-only routes are public and rate limited. Unpublished, revoked, malformed, and old rotated links return `404` without disclosing their state.
+
+- `GET /c/{slug}` returns a responsive HTML card with restrictive browser headers and no Wings account requirement.
+- `GET /c/{slug}/data` returns only the owner's currently visible fields.
+- `GET /c/{slug}/qr.svg` returns a standards-based QR code containing the public URL.
+- `GET /c/{slug}.vcf` downloads a vCard 3.0 file containing only visible fields.
+
+Set `PUBLIC_BASE_URL` to the externally reachable HTTPS API origin before publishing cards.
+
+## Exchanged contacts
+
+All contact routes require an authenticated identity and use a separate owner-isolated record collection.
+
+- `GET /contacts?q=` lists or searches the caller's saved snapshots and notes.
+- `POST /contacts` saves a confirmed public-card snapshot with `source`, exchange time, and private notes.
+- `PUT /contacts/{id}` updates private user notes.
+- `POST /contacts/{id}/conversation-note` explicitly attaches a user-selected note; conversations are never linked automatically.
+- `DELETE /contacts/{id}` deletes one saved contact.
+- `GET /contacts.vcf` exports the caller's contacts as concatenated vCards.
+
+Cross-owner IDs return `404`. Contact creation accepts only the documented bounded snapshot, source, and note fields.

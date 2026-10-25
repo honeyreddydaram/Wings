@@ -46,6 +46,7 @@ class Settings:
     log_format: str
     otel_enabled: bool
     otel_service_name: str
+    public_base_url: str
 
 
 def load_settings() -> Settings:
@@ -79,6 +80,7 @@ def load_settings() -> Settings:
         log_format=os.getenv("LOG_FORMAT", "json").lower(),
         otel_enabled=_bool("OTEL_ENABLED"),
         otel_service_name=os.getenv("OTEL_SERVICE_NAME", "cowingman-api"),
+        public_base_url=os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/"),
     )
     if settings.app_mode not in {"demo", "live"}:
         raise RuntimeError("APP_MODE must be 'demo' or 'live'")

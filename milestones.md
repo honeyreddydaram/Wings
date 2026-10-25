@@ -291,7 +291,7 @@ Reference: [Milestone 5 details](docs/MILESTONE_5.md).
 
 ## Milestone 6 — Digital Identity and Contact Exchange
 
-**Status: Pending**
+**Status: Implemented locally; physical-device QR/NFC validation pending**
 
 ### Objective
 
@@ -299,37 +299,39 @@ Let users share a controlled digital business card and manage exchanged contacts
 
 ### Digital card
 
-- [ ] Define private profile fields versus public card fields.
-- [ ] Add a card editor and preview.
-- [ ] Generate an unguessable or user-controlled public card URL.
-- [ ] Add per-field visibility and a global publish/unpublish control.
-- [ ] Render an accessible, responsive public card that does not require Wings.
-- [ ] Generate a downloadable standards-compatible vCard.
-- [ ] Add card rotation/revocation and abuse controls.
+- [x] Define private profile fields versus public card fields.
+- [x] Add a card editor and preview.
+- [x] Generate an unguessable or user-controlled public card URL.
+- [x] Add per-field visibility and a global publish/unpublish control.
+- [x] Render an accessible, responsive public card that does not require Wings.
+- [x] Generate a downloadable standards-compatible vCard.
+- [x] Add card rotation/revocation and abuse controls.
 
 ### QR and NFC exchange
 
-- [ ] Generate a QR code for the public card URL.
-- [ ] Add QR scanning with permission handling and validation.
-- [ ] Open shared cards safely and require confirmation before saving a contact.
+- [x] Generate a QR code for the public card URL.
+- [x] Add QR scanning with permission handling and validation.
+- [x] Open shared cards safely and require confirmation before saving a contact.
 - [ ] Evaluate Android NFC capabilities on the actual target devices and OS versions.
-- [ ] Implement only supported NFC tag/read flows; do not promise universal phone-to-phone NFC sharing.
-- [ ] Always offer QR code, link, and vCard alternatives.
+- [x] Implement only supported NFC tag/read flows; do not promise universal phone-to-phone NFC sharing. (No native NFC flow is enabled until target-device evaluation supports one.)
+- [x] Always offer QR code, link, and vCard alternatives.
 
 ### Contact management
 
-- [ ] Add a user-isolated contact record schema.
-- [ ] Store source, exchange time, user notes, and consented public-card snapshot.
-- [ ] Provide search, edit, export, and delete controls.
-- [ ] Connect conversation notes only through explicit user action.
-- [ ] Avoid scraping LinkedIn or other third-party services without authorization.
+- [x] Add a user-isolated contact record schema.
+- [x] Store source, exchange time, user notes, and consented public-card snapshot.
+- [x] Provide search, edit, export, and delete controls.
+- [x] Connect conversation notes only through explicit user action.
+- [x] Avoid scraping LinkedIn or other third-party services without authorization.
 
 ### Exit criteria
 
-- [ ] A non-Wings user can open the card and download a vCard.
+- [x] A non-Wings user can open the card and download a vCard.
 - [ ] QR exchange works reliably on target Android devices.
-- [ ] NFC capability and fallback behavior are accurately communicated.
-- [ ] Public fields, revocation, contact deletion, and authorization are tested.
+- [x] NFC capability and fallback behavior are accurately communicated.
+- [x] Public fields, revocation, contact deletion, and authorization are tested.
+
+Reference: [Milestone 6 details](docs/MILESTONE_6.md).
 
 ---
 
