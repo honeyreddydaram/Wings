@@ -13,9 +13,9 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
-import { Audio } from "expo-av";
 import { StatusBar } from "expo-status-bar";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRollingAudioPipeline } from "./src/audioPipeline";
 import {
   firebaseConfigured,
   getIdentityToken,
@@ -53,6 +53,10 @@ const EMPTY_PROFILE: Profile = {
   resume_summary: "",
 };
 const API = process.env.EXPO_PUBLIC_API_URL || "http://localhost:8000";
+const AUDIO_CHUNK_SECONDS = Math.min(
+  10,
+  Math.max(2, Number(process.env.EXPO_PUBLIC_AUDIO_CHUNK_SECONDS) || 4),
+);
 const C = {
   bg: "#F7F8F4",
   ink: "#203D32",
@@ -98,7 +102,7 @@ export default function App() {
     summary: string;
     saved: boolean;
   } | null>(null);
-  const [listening, setListening] = useState(false);
+  const [recordingConsent, setRecordingConsent] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [owner, setOwner] = useState("");
   const [authUser, setAuthUser] = useState<User | null>(null);
@@ -106,10 +110,12 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
-  const recording = useRef<Audio.Recording | null>(null);
-  const heard = useRef(false);
-  const lastVoice = useRef(0);
-  const vadPending = useRef(false);
+  const audio = useRollingAudioPipeline({
+    chunkSeconds: AUDIO_CHUNK_SECONDS,
+    onChunk: uploadAudioChunk,
+    onError: (message) => setError(message),
+  });
+  const listening = audio.phase === "recording";
   useEffect(() => {
     void (async () => {
       let key = await AsyncStorage.getItem("cw-owner");
@@ -248,6 +254,8 @@ export default function App() {
       setSeconds(0);
       setCues([]);
       setTranscript("");
+      setRecordingConsent(false);
+      audio.reset();
     });
   }
   async function add(text: string) {
@@ -259,35 +267,7 @@ export default function App() {
   }
   async function play(cue: Cue) {
     Speech.stop();
-    if (session?.mode === "demo") {
-      Speech.speak(cue.text, { rate: 0.9 });
-      return;
-    }
-    if (!session) return;
-    try {
-      const res = await fetch(
-        `${API}/session/${session.id}/cue/${cue.id}/speak`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${session.token}` },
-        },
-      );
-      if (!res.ok)
-        throw new Error("Voice unavailable. You can still read your cues.");
-      const blob = await res.blob();
-      if (Platform.OS === "web") {
-        const url = URL.createObjectURL(blob);
-        const audio = new window.Audio(url);
-        audio.onended = () => URL.revokeObjectURL(url);
-        await audio.play();
-      } else {
-        setError(
-          "Cloud voice playback on native is not available in this preview.",
-        );
-      }
-    } catch (e: any) {
-      setError(e.message);
-    }
+    Speech.speak(cue.text, { rate: 0.9 });
   }
   async function getCues() {
     if (!session) return;
@@ -298,84 +278,78 @@ export default function App() {
       if (voice && data.cues[0]) void play(data.cues[0]);
     });
   }
-  async function stopRecording(upload = true) {
-    const rec = recording.current;
-    if (!rec || !session) return;
-    recording.current = null;
-    setListening(false);
-    await rec.stopAndUnloadAsync();
-    if (!upload) return;
-    const uri = rec.getURI();
-    if (!uri) return;
+  async function uploadAudioChunk(
+    uri: string,
+    chunkIndex: number,
+    capturedAtMs: number,
+  ) {
+    if (!session) return;
     const form = new FormData();
+    form.append("chunk_index", String(chunkIndex));
+    form.append("captured_at_ms", String(capturedAtMs));
     if (Platform.OS === "web") {
       form.append("file", await (await fetch(uri)).blob(), "chunk.webm");
     } else {
       form.append("file", { uri, name: "chunk.m4a", type: "audio/m4a" } as any);
     }
-    const result = await api(`/session/${session.id}/audio`, form);
+    let response: Response | null = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        response = await fetch(`${API}/session/${session.id}/audio`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.token}` },
+          body: form,
+        });
+      } catch (networkError) {
+        if (attempt === 1) throw networkError;
+        continue;
+      }
+      if (attempt === 0 && [409, 502, 503, 504].includes(response.status)) {
+        continue;
+      }
+      break;
+    }
+    if (!response)
+      throw new Error("Audio upload failed before receiving a response.");
+    if (response.status === 422) return;
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(
+        detail.detail || `Audio upload failed (${response.status})`,
+      );
+    }
+    const result = await response.json();
     setTranscript((t) => (t + " " + result.text).slice(-2000));
     setSignal(result.signal);
-    await getCues();
   }
   async function mic() {
     if (!session) return;
-    if (listening) {
-      await run("Transcribing", () => stopRecording());
-      return;
-    }
     if (session.mode === "demo") {
       await run("Adding sample", () => add(SAMPLE));
       return;
     }
-    await run("Opening microphone", async () => {
-      const permission = await Audio.requestPermissionsAsync();
-      if (!permission.granted)
-        throw new Error(
-          "Microphone permission is needed to listen. You can type instead.",
-        );
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
-      const result = await Audio.Recording.createAsync({
-        ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
-        isMeteringEnabled: true,
-      });
-      recording.current = result.recording;
-      heard.current = false;
-      lastVoice.current = Date.now();
-      result.recording.setProgressUpdateInterval(250);
-      result.recording.setOnRecordingStatusUpdate((status) => {
-        if (!status.isRecording || status.metering === undefined) return;
-        if (status.metering > -38) {
-          heard.current = true;
-          lastVoice.current = Date.now();
-        }
-        const threshold = signal === "high" ? 1500 : 2600;
-        if (
-          heard.current &&
-          Date.now() - lastVoice.current > threshold &&
-          !vadPending.current
-        ) {
-          vadPending.current = true;
-          void stopRecording()
-            .catch((e) => setError(e.message))
-            .finally(() => {
-              vadPending.current = false;
-            });
-        }
-      });
-      setListening(true);
-    });
+    if (!recordingConsent) {
+      setError(
+        "Confirm that everyone knows the microphone is in use before recording.",
+      );
+      return;
+    }
+    if (listening) {
+      await run("Pausing microphone", () => audio.pause());
+      return;
+    }
+    Speech.stop();
+    await run("Opening microphone", () => audio.start());
   }
   async function end() {
     if (!session) return;
     await run("Wrapping up", async () => {
-      await stopRecording(false);
+      await audio.pause(true);
+      await audio.flush();
       const data = await api(`/session/${session.id}/end`);
       setEnded(data);
       Speech.stop();
+      audio.reset();
     });
   }
   const Button = ({
@@ -1108,17 +1082,27 @@ export default function App() {
                         <View style={{ flex: 1 }}>
                           <Text style={s.toggleTitle}>
                             {listening
-                              ? "Listening. Take your time."
+                              ? `Recording in ${AUDIO_CHUNK_SECONDS}-second chunks`
                               : session.mode === "demo"
                                 ? "Try a sample conversation"
-                                : "Ready to listen"}
+                                : audio.phase === "paused"
+                                  ? "Microphone paused"
+                                  : "Ready to listen"}
                           </Text>
                           <Text style={s.tiny}>
                             {session.mode === "demo"
                               ? "The mic button adds a sample transcript."
-                              : "Tap to record. A pause ends the chunk on supported devices."}
+                              : audio.pendingChunks
+                                ? `${audio.pendingChunks} chunk${audio.pendingChunks === 1 ? "" : "s"} waiting for transcription.`
+                                : "Tap to record or pause. Recent speech appears incrementally."}
                           </Text>
                         </View>
+                        {listening && (
+                          <View style={s.recordingBadge}>
+                            <View style={s.recordingDot} />
+                            <Text style={s.recordingBadgeText}>RECORDING</Text>
+                          </View>
+                        )}
                         <Text style={s.timer}>
                           {Math.floor(seconds / 60)
                             .toString()
@@ -1126,6 +1110,28 @@ export default function App() {
                           :{(seconds % 60).toString().padStart(2, "0")}
                         </Text>
                       </View>
+                      {session.mode !== "demo" && (
+                        <View style={s.consentRow}>
+                          <Icon name="people-outline" size={18} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.toggleTitle}>
+                              Everyone knows the microphone is in use
+                            </Text>
+                            <Text style={s.tiny}>
+                              Required before recording. The indicator stays
+                              visible while capture is active.
+                            </Text>
+                          </View>
+                          <Switch
+                            accessibilityLabel="Recording consent confirmed"
+                            value={recordingConsent}
+                            onValueChange={setRecordingConsent}
+                            disabled={listening}
+                            trackColor={{ false: "#DDE3DA", true: C.green }}
+                            thumbColor="#fff"
+                          />
+                        </View>
+                      )}
                       <View style={s.transcriptBox}>
                         <Text style={s.label}>THE RECENT CONVERSATION</Text>
                         <Text style={s.transcript}>
@@ -1700,6 +1706,36 @@ const s = StyleSheet.create({
     borderRadius: 25,
     alignItems: "center",
     justifyContent: "center",
+  },
+  recordingBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#F9EDE7",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  recordingDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: "#A75E47",
+  },
+  recordingBadgeText: {
+    color: "#8A4938",
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 0.7,
+  },
+  consentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: C.pale,
+    borderRadius: 9,
+    padding: 13,
+    marginBottom: 15,
   },
   timer: { fontSize: 13, color: C.muted, fontVariant: ["tabular-nums"] },
   transcriptBox: { backgroundColor: "#F5F7F1", padding: 17, borderRadius: 8 },

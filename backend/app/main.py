@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -189,13 +189,11 @@ def start(body: Start, request: Request):
     sid, token = str(uuid.uuid4()), secrets.token_urlsafe(32)
     ck = contact_key(identity.user_id, body.contact or body.name)
     memory = read(ck) if body.remember else None
-    state = {'id':sid,'owner_id':identity.user_id,'name':body.name,'context':body.context,'contact_key':ck,'remember':body.remember,'memory':(memory or {}).get('summary',''),'summary':'','fragments':[],'cues':[],'token_hash':hashlib.sha256(token.encode()).hexdigest(),'expires':time.time()+7200,'signal':'low'}
-    write('session:'+sid,state)
+    state = {'id':sid,'owner_id':identity.user_id,'name':body.name,'context':body.context,'contact_key':ck,'remember':body.remember,'memory':(memory or {}).get('summary',''),'summary':'','fragments':[],'cues':[],'audio_chunks':{},'token_hash':hashlib.sha256(token.encode()).hexdigest(),'expires':time.time()+7200,'signal':'low'}
+    write('session:'+state['id'],state)
     return {'id':sid,'token':token,'memory':state['memory'],'mode':MODE}
 
-@app.post('/session/{sid}/transcript')
-async def transcript(sid: str, body: Fragment, request: Request):
-    state = authorize(sid,request)
+async def ingest_fragment(state: dict, body: Fragment):
     state['fragments'].append(body.text.strip())
     joined = ' '.join(state['fragments'])
     hesitations = len(re.findall(r'\b(um|uh|maybe|sorry|actually)\b',joined,re.I))
@@ -203,17 +201,35 @@ async def transcript(sid: str, body: Fragment, request: Request):
     if len(joined)>800:
         state['summary'] = await summarize(state['summary']+' '+joined)
         state['fragments'] = [joined[-400:]]
-    write('session:'+sid,state)
+    write('session:'+state['id'],state)
     return {'text':body.text, 'signal':state['signal'],'window_chars':len(' '.join(state['fragments']))}
 
+@app.post('/session/{sid}/transcript')
+async def transcript(sid: str, body: Fragment, request: Request):
+    state = authorize(sid,request)
+    return await ingest_fragment(state, body)
+
 @app.post('/session/{sid}/audio')
-async def audio(sid: str, request: Request, file: UploadFile=File(...)):
-    authorize(sid,request)
+async def audio(
+    sid: str,
+    request: Request,
+    file: UploadFile=File(...),
+    chunk_index: int=Form(default=0, ge=0),
+    captured_at_ms: int | None=Form(default=None, ge=0),
+):
+    state = authorize(sid,request)
     if MODE=='demo':
         raise HTTPException(503,'Transcription is disabled in demo mode. Use the demo transcript instead.')
+    cached = state.get('audio_chunks', {}).get(str(chunk_index))
+    if cached:
+        return dict(cached, duplicate=True)
+    allowed_types = {'audio/m4a','audio/mp4','audio/x-m4a','audio/webm','application/octet-stream'}
+    if file.content_type and file.content_type not in allowed_types:
+        raise HTTPException(415,'Unsupported audio type. Send M4A or WebM audio.')
     data = await file.read(settings.max_audio_bytes+1)
     if len(data)>settings.max_audio_bytes:
         raise HTTPException(413,'Audio chunk exceeds 8 MB')
+    started = time.perf_counter()
     try:
         from .speech import transcribe
         try:
@@ -222,7 +238,20 @@ async def audio(sid: str, request: Request, file: UploadFile=File(...)):
             raise HTTPException(502,'Google transcription unavailable. Check audio format, duration, and Speech API access.')
         if not text:
             raise HTTPException(422,'No speech detected. Try a clearer recording.')
-        return await transcript(sid,Fragment(text=text),request)
+        result = await ingest_fragment(state,Fragment(text=text))
+        result.update(chunk_index=chunk_index, duplicate=False)
+        chunks = state.setdefault('audio_chunks', {})
+        chunks[str(chunk_index)] = result
+        for old_index in sorted(chunks, key=int)[:-32]:
+            chunks.pop(old_index, None)
+        write('session:'+sid,state)
+        log.info('audio_chunk_transcribed', extra={
+            'request_id': getattr(request.state, 'request_id', None),
+            'chunk_index': chunk_index,
+            'audio_bytes': len(data),
+            'transcription_ms': round((time.perf_counter()-started)*1000, 2),
+        })
+        return result
     except httpx.HTTPError:
         raise HTTPException(502,'Transcription provider unavailable')
     finally:

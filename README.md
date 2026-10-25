@@ -1,6 +1,6 @@
 # Co-Wingman (Wings)
 
-Co-Wingman is an Android-first conversation assistant that offers short questions and gentle suggestions while keeping the person—not the assistant—at the center. This repository is a working local MVP with Milestones 1 and 2 implemented for the Gator Hacks project.
+Co-Wingman is an Android-first conversation assistant that offers short questions and gentle suggestions while keeping the person—not the assistant—at the center. This repository is a working local MVP with Milestones 1–3 implemented for the Gator Hacks project.
 
 The default configuration is an explicit demo: SQLite storage, preset topic-based cues, keyword summaries, and device speech. It needs no cloud account and makes no AI calls. Live integrations exist for Gemini, Google Speech-to-Text, Firestore, and optional Cloud Storage, but require credentials and have not been production-validated. Gemma is an architectural target for Milestone 5, not an implemented provider.
 
@@ -10,10 +10,11 @@ The default configuration is an explicit demo: SQLite storage, preset topic-base
 - `backend/app/main.py`: FastAPI routes, session authorization, and current storage coordination.
 - `backend/app/core/`: centralized configuration, Firebase/demo authentication, and privacy-safe structured logging.
 - `backend/app/services/`: replaceable inference and summary boundaries.
-- `backend/app/speech.py`: Google Speech-to-Text adapter for completed audio chunks.
+- `mobile/src/audioPipeline.ts`: consented rolling capture, ordered upload queue, and pause/resume lifecycle.
+- `backend/app/speech.py`: Google Speech-to-Text adapter for short completed audio chunks.
 - `infra/gcp/`: reference Cloud Run deployment files; no deployment is implied.
 
-See [Architecture](docs/ARCHITECTURE.md), [API contracts](docs/API.md), [Milestone 2 scope](docs/MILESTONE_2.md), [repository audit](docs/REPOSITORY_AUDIT.md), [observability](docs/OBSERVABILITY.md), and [security](docs/SECURITY.md).
+See [Architecture](docs/ARCHITECTURE.md), [API contracts](docs/API.md), [Milestone 2 scope](docs/MILESTONE_2.md), [Milestone 3 scope](docs/MILESTONE_3.md), [repository audit](docs/REPOSITORY_AUDIT.md), [observability](docs/OBSERVABILITY.md), and [security](docs/SECURITY.md).
 
 ## Requirements
 
@@ -53,7 +54,7 @@ curl -i http://localhost:8000/readyz
 
 ```bash
 cd mobile
-EXPO_PUBLIC_API_URL=http://localhost:8000 EXPO_HOME=/tmp/wings-expo EXPO_NO_TELEMETRY=1 npm run web
+EXPO_PUBLIC_API_URL=http://localhost:8000 EXPO_PUBLIC_AUDIO_CHUNK_SECONDS=4 EXPO_HOME=/tmp/wings-expo EXPO_NO_TELEMETRY=1 npm run web
 ```
 
 For native development, run `npx expo start`. A physical device cannot reach your computer through `localhost`; set `EXPO_PUBLIC_API_URL` to a reachable HTTPS API address. No APK is included or claimed to have been published.
@@ -70,6 +71,12 @@ For native development, run `npx expo start`. A physical device cannot reach you
 Demo mode does not record or transcribe microphone audio, call cloud AI, diagnose anxiety, or simulate the future four-second audio classifier.
 
 The Profile screen persists professional context locally in demo mode. On native devices, the demo identity now survives restarts through AsyncStorage.
+
+## Live audio workflow
+
+In live mode, the user must confirm participant awareness before recording. The client shows a persistent recording badge, captures bounded four-second M4A/WebM chunks with `expo-audio`, queues uploads in order, and appends successful Speech-to-Text results incrementally. Pause stops capture; ending a session discards the unfinished chunk and waits for queued uploads before summarizing. Silent chunks are ignored without stopping capture. Cue speech uses on-device synthesis so Android does not need to download authenticated audio.
+
+This is near-real-time chunked transcription, not a raw PCM WebSocket or direct gRPC stream. That boundary is deliberate: Expo's managed recorder produces files, while Google streaming recognition requires a gRPC audio stream. A future native capture module can replace the client transport without changing session or transcript contracts.
 
 ## Firebase authentication
 
@@ -103,7 +110,8 @@ The complete annotated list is in `backend/.env.example`. Key groups are:
 - Browser access: `CORS_ORIGINS` (comma-separated exact origins).
 - AI: `INFERENCE_PROVIDER`, `INFERENCE_MODEL`, `TTS_MODEL`, and server-only `GEMINI_API_KEY`.
 - Google speech: `GOOGLE_CLOUD_PROJECT`, `SPEECH_LOCATION`, `SPEECH_LANGUAGE`.
-- Pipeline planning: `AUDIO_WINDOW_SECONDS`, `SUMMARY_CHECKPOINT_SECONDS`, `MAX_AUDIO_BYTES`.
+- Audio pipeline: backend `AUDIO_WINDOW_SECONDS`/`MAX_AUDIO_BYTES` and client `EXPO_PUBLIC_AUDIO_CHUNK_SECONDS`; keep the chunk duration aligned.
+- Pipeline planning: `SUMMARY_CHECKPOINT_SECONDS` remains reserved for timed summaries.
 - Telemetry: `LOG_LEVEL`, `LOG_FORMAT`, `OTEL_ENABLED`, `OTEL_SERVICE_NAME`. OpenTelemetry export is not implemented yet.
 
 Use `APP_MODE=live`, a Firestore collection, and `INFERENCE_PROVIDER=gemini` only in a configured server environment. Demo mode never requires Google credentials. `INFERENCE_PROVIDER=gemma` is a reserved future selection and currently fails closed.
@@ -115,13 +123,14 @@ Use `APP_MODE=live`, a Firestore collection, and `INFERENCE_PROVIDER=gemini` onl
 - **CORS failure:** list the exact frontend origin, including port, then restart the backend because settings load at startup.
 - **Live startup fails:** `APP_MODE=live` requires `FIRESTORE_COLLECTION`; provider calls additionally require credentials and permissions.
 - **Profile returns 401:** client and backend auth modes must match. Firebase mode requires a signed-in user and server credentials capable of verifying ID tokens.
-- **Audio returns 503 in demo:** expected; use the sample transcript. Live transcription accepts completed chunks only, up to the configured byte limit.
+- **Audio returns 503 in demo:** expected; use the sample transcript. Live transcription accepts ordered M4A/WebM chunks only, up to the configured byte limit.
+- **No live transcript appears:** verify participant-awareness confirmation, microphone permission, HTTPS on non-local web origins, Google Speech credentials, and the Speech-to-Text API.
 - **Node version error:** use Node 20.19+ and reinstall with `npm ci`.
 
 ## Current limitations and next milestones
 
-Firebase authentication and persistent profiles are implemented but still need validation against a real Firebase project and Android build. Session capability tokens remain in memory, and there is no continuous streaming, clinical anxiety detection, NFC exchange, résumé-file ingestion, production alerting, or deployed dashboard. Operational logs are structured and omit request bodies and credentials, but full tracing/metrics arrives in Milestone 7.
+Firebase authentication, profiles, and the M3 rolling-audio path are implemented but still need validation against a real Firebase/Google Cloud project and physical Android device. Session capability tokens remain in memory, and there is no raw PCM streaming, clinical anxiety detection, NFC exchange, résumé-file ingestion, production alerting, or deployed dashboard. Operational logs are structured and omit request bodies and credentials, but full tracing/metrics arrives in Milestone 7.
 
-Milestone 3 should begin with reliable microphone streaming and incremental transcription while retaining the identity and profile boundaries established here. The remaining roadmap is described in [Architecture](docs/ARCHITECTURE.md).
+Milestone 4 should add conservative, on-device derived audio features and intervention cooldowns without changing the M3 capture/transcript boundary. The remaining roadmap is described in [Architecture](docs/ARCHITECTURE.md).
 
 For deployment-specific caveats, see [Google Cloud deployment](infra/gcp/README.md).

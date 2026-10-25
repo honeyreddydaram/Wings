@@ -1,6 +1,7 @@
 import os
 import tempfile
 from dataclasses import replace
+from unittest.mock import AsyncMock
 os.environ['DATABASE_PATH'] = tempfile.mktemp(suffix='.db')
 os.environ['APP_MODE'] = 'demo'
 from fastapi.testclient import TestClient
@@ -120,3 +121,34 @@ def test_firebase_mode_uses_verified_uid(monkeypatch):
     assert started.status_code == 200
     state = read('session:'+started.json()['id'])
     assert state['owner_id'] == 'firebase-user-alice'
+
+def test_ordered_audio_chunks_are_idempotent(monkeypatch):
+    import app.speech as speech_module
+
+    monkeypatch.setattr(main_module, 'MODE', 'live')
+    transcribe = AsyncMock(return_value='A short incremental transcript.')
+    monkeypatch.setattr(speech_module, 'transcribe', transcribe)
+    session, headers = start()
+    path = f"/session/{session['id']}/audio"
+    payload = {'chunk_index':'7', 'captured_at_ms':'123456'}
+    files = {'file':('chunk.m4a', b'encoded-audio', 'audio/m4a')}
+
+    first = client.post(path, headers=headers, data=payload, files=files)
+    assert first.status_code == 200
+    assert first.json()['chunk_index'] == 7
+    assert first.json()['duplicate'] is False
+    assert first.json()['text'] == 'A short incremental transcript.'
+
+    duplicate = client.post(path, headers=headers, data=payload, files=files)
+    assert duplicate.status_code == 200
+    assert duplicate.json()['duplicate'] is True
+    transcribe.assert_awaited_once()
+    assert read('session:'+session['id'])['fragments'] == ['A short incremental transcript.']
+
+    unsupported = client.post(
+        path,
+        headers=headers,
+        data={'chunk_index':'8'},
+        files={'file':('chunk.txt', b'not-audio', 'text/plain')},
+    )
+    assert unsupported.status_code == 415

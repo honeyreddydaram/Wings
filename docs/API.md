@@ -86,9 +86,15 @@ The text is echoed for client compatibility. Long active context is summarized a
 
 ### `POST /session/{sid}/audio`
 
-Transcribes one completed audio chunk, then applies the transcript contract. Requires bearer token. Send multipart form data with field `file`. The configured default maximum is 8 MiB.
+Transcribes one short completed audio chunk, then applies the transcript contract. Requires bearer token. Send multipart form data with `file`, non-negative integer `chunk_index`, and optional non-negative `captured_at_ms`. `chunk_index` defaults to `0` for older clients. Supported content types are M4A/MP4, WebM, and generic binary. The configured default maximum is 8 MiB.
 
-Response `200` is the transcript response above. Errors: `413` too large; `422` no speech; `502` transcription unavailable; `503` disabled in demo; common session errors. Raw audio is not intentionally persisted by this handler.
+Response `200` extends the transcript response:
+
+```json
+{"text":"Conversation fragment","signal":"low","window_chars":21,"chunk_index":7,"duplicate":false}
+```
+
+The server retains results for the latest 32 chunk indexes in session state. Retrying an accepted index returns the cached response with `duplicate: true` without retranscribing or duplicating context. Errors: `413` too large; `415` unsupported media type; `422` no speech/invalid form; `502` transcription unavailable; `503` disabled in demo; common session errors. Raw audio is not intentionally persisted by this handler.
 
 ### `POST /session/{sid}/cue`
 
