@@ -14,6 +14,7 @@ import {
   Share,
   Alert,
   AppState,
+  Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
@@ -112,6 +113,32 @@ const EMPTY_PROFILE: Profile = {
   portfolio_url: "",
   resume_summary: "",
 };
+const POPULAR_SKILLS = [
+  "Python",
+  "TypeScript / React",
+  "Generative AI & LLMs",
+  "Cloud & GCP Architecture",
+  "Machine Learning & PyTorch",
+  "FastAPI & Backend APIs",
+  "Mobile Apps (React Native)",
+  "Data Engineering & SQL",
+  "Docker & Kubernetes",
+  "System Design & DevOps",
+];
+
+const POPULAR_INTERESTS = [
+  "Autonomous AI Agents",
+  "Edge AI & Embedded Systems",
+  "Humanoid Robotics",
+  "Open-Source Models (Gemma)",
+  "Real-Time Speech & Audio AI",
+  "Startup Pitching & VC",
+  "Platform Engineering",
+  "Cybersecurity & Privacy",
+  "Developer Tooling",
+  "Tech Networking & Hackathons",
+];
+
 const API = process.env.EXPO_PUBLIC_API_URL || "http://localhost:8000";
 const AUDIO_CHUNK_SECONDS = Math.min(
   10,
@@ -185,6 +212,7 @@ export default function App() {
   const [scannedCard, setScannedCard] = useState<PublicCard | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanLocked, setScanLocked] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const difficultyDetector = useRef(new DifficultyDetector());
   const autoAssistRef = useRef(false);
@@ -447,6 +475,32 @@ export default function App() {
       const response = await identityFetch("/card/me");
       setCard(await response.json());
     });
+  }
+  async function openShareModal() {
+    setShowShareModal(true);
+    let activeCard = card;
+    if (!activeCard.slug || !activeCard.public_url) {
+      try {
+        const response = await identityFetch("/card/me");
+        if (response.ok) {
+          activeCard = await response.json();
+          setCard(activeCard);
+        }
+      } catch {
+        // fallback
+      }
+    }
+    if (!activeCard.published && activeCard.public_url) {
+      const updated = {
+        ...activeCard,
+        published: true,
+        display_name: activeCard.display_name || profile.display_name || "Wings User",
+        headline: activeCard.headline || profile.headline || "",
+        organization: activeCard.organization || profile.organization || "",
+      };
+      setCard(updated);
+      void saveCard(updated);
+    }
   }
   async function beginScan() {
     const permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
@@ -877,17 +931,28 @@ export default function App() {
                   ? "PERSONAL NOTES"
                   : "PRIVACY"}
           </Text>
-          <View style={s.demoBadge}>
-            <View style={s.demoDot} />
-            <Text style={s.demoText}>
-              {firebaseConfigured
-                ? authUser
-                  ? "Authenticated"
-                  : "Sign-in required"
-                : session?.mode === "live"
-                  ? "Live mode"
-                  : "Demo workspace"}
-            </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Share my QR card"
+              style={s.topbarShareBtn}
+              onPress={openShareModal}
+            >
+              <Icon name="qr-code-outline" size={15} color={C.green} />
+              <Text style={s.topbarShareText}>My QR</Text>
+            </Pressable>
+            <View style={s.demoBadge}>
+              <View style={s.demoDot} />
+              <Text style={s.demoText}>
+                {firebaseConfigured
+                  ? authUser
+                    ? "Authenticated"
+                    : "Sign-in required"
+                  : session?.mode === "live"
+                    ? "Live mode"
+                    : "Demo workspace"}
+              </Text>
+            </View>
           </View>
         </View>
         {!wide && (
@@ -1020,6 +1085,9 @@ export default function App() {
                     <View style={s.cardHeader}>
                       <View style={s.iconTile}><Icon name="id-card-outline" /></View>
                       <Text style={s.cardTitle}>Public card editor</Text>
+                      <View style={{ marginLeft: "auto" }}>
+                        <Button text="Share my QR code" icon="qr-code-outline" onPress={openShareModal} />
+                      </View>
                     </View>
                     <Text style={s.small}>Your professional profile stays private. Only enabled fields on this separate card appear publicly.</Text>
                     {CARD_FIELDS.map(({ key, label, placeholder }) => (
@@ -1065,14 +1133,35 @@ export default function App() {
                     {CARD_FIELDS.filter(({ key }) => key !== "display_name" && card.visibility[key] && card[key]).map(({ key }) => (
                       <Text key={key} style={key === "headline" ? s.cardTitle : s.small}>{card[key]}</Text>
                     ))}
-                    {card.published && card.public_url ? (
+                    {card.public_url ? (
                       <>
                         <View style={s.qrFrame}><QRCode value={card.public_url} size={190} color={C.ink} backgroundColor="#fff" /></View>
+                        <View style={[s.statusBadge, { alignSelf: "center", marginBottom: 6 }]}>
+                          <Icon name={card.published ? "checkmark-circle" : "alert-circle"} size={14} color={card.published ? "#2E7D32" : C.orange} />
+                          <Text style={[s.tiny, { color: card.published ? "#2E7D32" : C.orange, fontWeight: "600" }]}>
+                            {card.published ? "Active · Ready to scan" : "Unpublished · Tap below to activate"}
+                          </Text>
+                        </View>
                         <Text selectable style={[s.tiny, { textAlign: "center" }]}>{card.public_url}</Text>
+                        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", justifyContent: "center", marginVertical: 6 }}>
+                          <Button text="Full-screen QR" icon="qr-code-outline" onPress={openShareModal} />
+                          {!card.published && (
+                            <Button text="Publish & Activate" icon="globe-outline" outline onPress={async () => {
+                              const updated = { ...card, published: true };
+                              setCard(updated);
+                              await saveCard(updated);
+                            }} />
+                          )}
+                        </View>
                         <Button text="Open public card" outline icon="open-outline" onPress={() => void Linking.openURL(card.public_url)} />
                         <Button text="Download my vCard" outline icon="download-outline" onPress={() => void Linking.openURL(card.public_url + ".vcf")} />
                       </>
-                    ) : <Text style={s.small}>Publish and save to activate the QR code, link, and vCard.</Text>}
+                    ) : (
+                      <View style={{ alignItems: "center", gap: 10, paddingVertical: 14 }}>
+                        <Text style={s.small}>Your public card link will activate when saved.</Text>
+                        <Button text="Generate & Share QR Code" icon="qr-code-outline" onPress={openShareModal} />
+                      </View>
+                    )}
                     <View style={s.nfcNote}><Icon name="phone-portrait-outline" /><Text style={[s.small, { flex: 1 }]}>NFC works only with compatible, pre-written NDEF tags and supported devices. Wings does not claim universal phone-to-phone NFC sharing; use this QR, link, or vCard fallback.</Text></View>
                   </View>
                 </View>
@@ -1199,6 +1288,7 @@ export default function App() {
                         : "Stored locally in demo mode"}
                     </Text>
                   </View>
+                  <Button text="My QR Code" icon="qr-code-outline" outline onPress={openShareModal} />
                 </View>
                 <TextInput
                   value={profile.display_name}
@@ -1225,38 +1315,105 @@ export default function App() {
                   placeholderTextColor={C.muted}
                   style={s.profileInput}
                 />
-                <TextInput
-                  value={profile.skills.join(", ")}
-                  onChangeText={(v) =>
-                    setProfile({
-                      ...profile,
-                      skills: v
-                        .split(",")
-                        .map((x) => x.trim())
-                        .filter(Boolean)
-                        .slice(0, 20),
-                    })
-                  }
-                  placeholder="Skills, separated by commas"
-                  placeholderTextColor={C.muted}
-                  style={s.profileInput}
-                />
-                <TextInput
-                  value={profile.interests.join(", ")}
-                  onChangeText={(v) =>
-                    setProfile({
-                      ...profile,
-                      interests: v
-                        .split(",")
-                        .map((x) => x.trim())
-                        .filter(Boolean)
-                        .slice(0, 20),
-                    })
-                  }
-                  placeholder="Interests, separated by commas"
-                  placeholderTextColor={C.muted}
-                  style={s.profileInput}
-                />
+                <View style={{ gap: 8, marginVertical: 4 }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                    <Text style={s.label}>TECH SKILLS ({profile.skills.length} SELECTED)</Text>
+                    <Text style={s.tiny}>Tap to toggle</Text>
+                  </View>
+                  <View style={s.chipContainer}>
+                    {POPULAR_SKILLS.map((skill) => {
+                      const selected = profile.skills.includes(skill);
+                      return (
+                        <Pressable
+                          key={skill}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: selected }}
+                          accessibilityLabel={`Skill: ${skill}`}
+                          onPress={() => {
+                            const next = selected
+                              ? profile.skills.filter((item) => item !== skill)
+                              : [...profile.skills, skill].slice(0, 20);
+                            setProfile({ ...profile, skills: next });
+                          }}
+                          style={[s.chip, selected && s.chipSelected]}
+                        >
+                          <Icon
+                            name={selected ? "checkmark-circle" : "add-circle-outline"}
+                            size={14}
+                            color={selected ? "#FFFFFF" : C.muted}
+                          />
+                          <Text style={[s.chipText, selected && s.chipTextSelected]}>
+                            {skill}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  <TextInput
+                    value={profile.skills.filter((item) => !POPULAR_SKILLS.includes(item)).join(", ")}
+                    onChangeText={(v) => {
+                      const custom = v.split(",").map((x) => x.trim()).filter(Boolean);
+                      const selectedStandard = profile.skills.filter((item) => POPULAR_SKILLS.includes(item));
+                      setProfile({
+                        ...profile,
+                        skills: [...selectedStandard, ...custom].slice(0, 20),
+                      });
+                    }}
+                    placeholder="Other skills (comma separated)"
+                    placeholderTextColor={C.muted}
+                    style={s.profileInput}
+                  />
+                </View>
+
+                <View style={{ gap: 8, marginVertical: 4 }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                    <Text style={s.label}>AREAS OF INTEREST ({profile.interests.length} SELECTED)</Text>
+                    <Text style={s.tiny}>Tap to toggle</Text>
+                  </View>
+                  <View style={s.chipContainer}>
+                    {POPULAR_INTERESTS.map((interest) => {
+                      const selected = profile.interests.includes(interest);
+                      return (
+                        <Pressable
+                          key={interest}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: selected }}
+                          accessibilityLabel={`Interest: ${interest}`}
+                          onPress={() => {
+                            const next = selected
+                              ? profile.interests.filter((item) => item !== interest)
+                              : [...profile.interests, interest].slice(0, 20);
+                            setProfile({ ...profile, interests: next });
+                          }}
+                          style={[s.chip, selected && s.chipSelected]}
+                        >
+                          <Icon
+                            name={selected ? "checkmark-circle" : "add-circle-outline"}
+                            size={14}
+                            color={selected ? "#FFFFFF" : C.muted}
+                          />
+                          <Text style={[s.chipText, selected && s.chipTextSelected]}>
+                            {interest}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  <TextInput
+                    value={profile.interests.filter((item) => !POPULAR_INTERESTS.includes(item)).join(", ")}
+                    onChangeText={(v) => {
+                      const custom = v.split(",").map((x) => x.trim()).filter(Boolean);
+                      const selectedStandard = profile.interests.filter((item) => POPULAR_INTERESTS.includes(item));
+                      setProfile({
+                        ...profile,
+                        interests: [...selectedStandard, ...custom].slice(0, 20),
+                      });
+                    }}
+                    placeholder="Other interests (comma separated)"
+                    placeholderTextColor={C.muted}
+                    style={s.profileInput}
+                  />
+                </View>
                 <TextInput
                   multiline
                   value={profile.networking_goals}
@@ -1968,6 +2125,115 @@ export default function App() {
           </Text>
         </View>
       </ScrollView>
+
+      <Modal
+        visible={showShareModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowShareModal(false)}
+      >
+        <View style={s.modalOverlay}>
+          <View style={s.modalContent}>
+            <View style={s.modalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.modalTitle}>Share Your Digital Card</Text>
+                <Text style={s.tiny}>Let someone scan this code to exchange contacts</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close share modal"
+                style={s.modalClose}
+                onPress={() => setShowShareModal(false)}
+              >
+                <Icon name="close" color={C.ink} size={20} />
+              </Pressable>
+            </View>
+
+            <View style={s.modalQrCard}>
+              <View style={s.modalAvatar}>
+                <Text style={s.initials}>
+                  {(card.display_name || profile.display_name || "ME")
+                    .split(" ")
+                    .map((p) => p[0])
+                    .join("")
+                    .slice(0, 2)
+                    .toUpperCase()}
+                </Text>
+              </View>
+              <Text style={s.modalCardName}>
+                {card.display_name || profile.display_name || "Your Name"}
+              </Text>
+              <Text style={s.modalCardHeadline}>
+                {[card.headline || profile.headline, card.organization || profile.organization]
+                  .filter(Boolean)
+                  .join(" · ") || "Co-Wingman Member"}
+              </Text>
+
+              <View style={s.modalQrFrame}>
+                {card.public_url ? (
+                  <QRCode
+                    value={card.public_url}
+                    size={210}
+                    color={C.ink}
+                    backgroundColor="#FFFFFF"
+                  />
+                ) : (
+                  <ActivityIndicator color={C.green} size="large" />
+                )}
+              </View>
+
+              <View style={s.statusBadge}>
+                <Icon name={card.published ? "checkmark-circle" : "alert-circle"} size={14} color={card.published ? "#2E7D32" : C.orange} />
+                <Text style={[s.tiny, { color: card.published ? "#2E7D32" : C.orange, fontWeight: "600" }]}>
+                  {card.published ? "Active · Anyone can scan" : "Unpublished · Tap below to activate"}
+                </Text>
+              </View>
+
+              {card.public_url ? (
+                <Text selectable style={[s.tiny, { textAlign: "center", color: C.muted }]} numberOfLines={1}>
+                  {card.public_url}
+                </Text>
+              ) : null}
+
+              <View style={s.modalActions}>
+                <Button
+                  text="Share link"
+                  icon="share-outline"
+                  onPress={async () => {
+                    if (!card.public_url) return;
+                    try {
+                      await Share.share({
+                        title: `${card.display_name || "My"} Digital Card`,
+                        message: `Connect with ${card.display_name || "me"}: ${card.public_url}`,
+                        url: card.public_url,
+                      });
+                    } catch {
+                      // fallback
+                    }
+                  }}
+                />
+                {!card.published && (
+                  <Button
+                    text="Publish card"
+                    icon="globe-outline"
+                    outline
+                    onPress={async () => {
+                      const updated = { ...card, published: true };
+                      setCard(updated);
+                      await saveCard(updated);
+                    }}
+                  />
+                )}
+                <Button
+                  text="Done"
+                  outline
+                  onPress={() => setShowShareModal(false)}
+                />
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -2560,4 +2826,146 @@ const s = StyleSheet.create({
   infoRow: { flexDirection: "row", gap: 15, marginBottom: 24 },
   infoTitle: { fontSize: 15, color: C.ink, marginBottom: 7, fontWeight: "600" },
   diagnostics: { backgroundColor: C.pale, borderRadius: 10, padding: 16, marginBottom: 20 },
+  topbarShareBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: "#EBF1E6",
+    borderWidth: 1,
+    borderColor: "#D2DFC9",
+  },
+  topbarShareText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: C.green,
+  },
+  chipContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginVertical: 4,
+  },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 18,
+    backgroundColor: "#FCFCF9",
+    borderWidth: 1,
+    borderColor: C.line,
+  },
+  chipSelected: {
+    backgroundColor: C.green,
+    borderColor: C.green,
+  },
+  chipText: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: C.ink,
+  },
+  chipTextSelected: {
+    color: "#FFFFFF",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    maxWidth: 420,
+    width: "100%",
+    padding: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: C.ink,
+  },
+  modalClose: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#F0F3EC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalQrCard: {
+    alignItems: "center",
+    gap: 8,
+  },
+  modalAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#E6EDDF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 2,
+  },
+  modalCardName: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: C.ink,
+    textAlign: "center",
+  },
+  modalCardHeadline: {
+    fontSize: 13,
+    color: C.muted,
+    textAlign: "center",
+    maxWidth: 320,
+  },
+  modalQrFrame: {
+    backgroundColor: "#FFFFFF",
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.line,
+    marginVertical: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 220,
+    minWidth: 220,
+  },
+  statusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: "#F2F5EF",
+    borderRadius: 12,
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 14,
+    width: "100%",
+    justifyContent: "center",
+    flexWrap: "wrap",
+  },
 });
